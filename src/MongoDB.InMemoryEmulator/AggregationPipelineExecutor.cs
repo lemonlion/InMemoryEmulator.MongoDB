@@ -737,7 +737,10 @@ internal static class AggregationPipelineExecutor
     private static IEnumerable<BsonDocument> ExecuteCount(IEnumerable<BsonDocument> input, string fieldName)
     {
         var count = input.Count();
-        yield return new BsonDocument(fieldName, count);
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/count/
+        //   "If the input dataset is empty, $count doesn't return a result."
+        if (count > 0)
+            yield return new BsonDocument(fieldName, count);
     }
 
     // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/sortByCount/

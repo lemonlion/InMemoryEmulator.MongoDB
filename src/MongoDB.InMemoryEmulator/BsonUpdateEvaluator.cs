@@ -352,8 +352,13 @@ internal static class BsonUpdateEvaluator
 
             var current = ResolveFieldPath(doc, fieldPath);
 
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/push/
+            //   If the field is absent, $push creates it as an array.
+            //   If the field exists with a null value, it should throw.
             if (current == BsonNull.Value)
             {
+                if (BsonFilterEvaluator.FieldExists(doc, fieldPath))
+                    throw MongoErrors.BadValue($"The field '{fieldPath}' must be an array but is of type Null");
                 SetFieldPath(doc, fieldPath, new BsonArray());
                 current = ResolveFieldPath(doc, fieldPath);
             }
@@ -580,8 +585,13 @@ internal static class BsonUpdateEvaluator
             }
 
             var current = ResolveFieldPath(doc, element.Name);
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/addToSet/
+            //   If the field is absent, $addToSet creates it as an array.
+            //   If the field exists with a null value, it should throw.
             if (current == BsonNull.Value)
             {
+                if (BsonFilterEvaluator.FieldExists(doc, element.Name))
+                    throw MongoErrors.BadValue($"The field '{element.Name}' must be an array but is of type Null");
                 SetFieldPath(doc, element.Name, new BsonArray());
                 current = ResolveFieldPath(doc, element.Name);
             }

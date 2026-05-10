@@ -64,7 +64,18 @@ internal static class AggregationExpressionEvaluator
         // Check if it's an operator expression (single key starting with $)
         var firstName = exprDoc.GetElement(0).Name;
         if (!firstName.StartsWith("$"))
-            return exprDoc; // literal document
+        {
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/group/
+            //   "You can specify an _id value of a document that contains field path expressions."
+            // Non-operator documents may contain expressions in their values (e.g., { year: "$year" })
+            // Recursively evaluate each value.
+            var result = new BsonDocument();
+            foreach (var el in exprDoc)
+            {
+                result[el.Name] = Evaluate(doc, el.Value, variables);
+            }
+            return result;
+        }
 
         if (exprDoc.ElementCount == 1)
         {

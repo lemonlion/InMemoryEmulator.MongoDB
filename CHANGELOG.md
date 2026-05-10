@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.31] - 2026-05-11
+
+### Fixed
+- **CRITICAL**: `$group` with document `_id` expression (e.g., `{ fieldA: "$a", fieldB: "$b" }`) now correctly evaluates field references — previously returned the literal expression as the grouping key, collapsing all documents into one group
+- `$count` aggregation stage on empty input now returns no documents — previously returned `{ total: 0 }`
+- `$push` on a field with `null` value now throws proper error — previously silently created an array
+- `$addToSet` on a field with `null` value now throws proper error — previously silently created an array
+
+### Added
+- 4 new integration tests covering `$group` document `_id`, `$count` empty input, `$push`/`$addToSet` null field handling
+
 ## [0.11.28] - 2026-05-11
 
 ### Fixed
