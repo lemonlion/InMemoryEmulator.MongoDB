@@ -147,8 +147,13 @@ public class InMemoryMongoDatabase : IMongoDatabase
     public void DropCollection(string name, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        // Ref: https://www.mongodb.com/docs/manual/reference/command/drop/
+        //   "Removes an entire collection from a database." — must remove all metadata.
         _stores.TryRemove(name, out _);
         _explicitlyCreated.TryRemove(name, out _);
+        _views.TryRemove(name, out _);
+        _validators.TryRemove(name, out _);
+        _timeSeriesOptions.TryRemove(name, out _);
     }
 
     public void DropCollection(IClientSessionHandle session, string name, CancellationToken cancellationToken = default)
@@ -294,6 +299,15 @@ public class InMemoryMongoDatabase : IMongoDatabase
 
             _explicitlyCreated.TryRemove(oldName, out _);
             _explicitlyCreated.TryAdd(newName, true);
+
+            // Ref: https://www.mongodb.com/docs/manual/reference/command/renameCollection/
+            //   "Changes the name of an existing collection." — all metadata survives the rename.
+            if (_validators.TryRemove(oldName, out var validator))
+                _validators[newName] = validator;
+            if (_views.TryRemove(oldName, out var view))
+                _views[newName] = view;
+            if (_timeSeriesOptions.TryRemove(oldName, out var tsOpts))
+                _timeSeriesOptions[newName] = tsOpts;
         }
         else
         {
@@ -524,6 +538,21 @@ public class InMemoryMongoDatabase : IMongoDatabase
     {
         // Ref: https://www.mongodb.com/docs/manual/reference/command/create/
         var collName = cmd.GetElement(0).Value.AsString;
+
+        // Ref: https://www.mongodb.com/docs/manual/core/views/
+        //   "You can create a view using the create command with the viewOn field."
+        if (cmd.Contains("viewOn"))
+        {
+            var viewOn = cmd["viewOn"].AsString;
+            var pipeline = cmd.Contains("pipeline")
+                ? cmd["pipeline"].AsBsonArray.Select(s => s.AsBsonDocument).ToList()
+                : new List<BsonDocument>();
+            _views[collName] = (viewOn, new BsonArray(pipeline));
+            GetOrCreateStore(viewOn);
+            _explicitlyCreated.TryAdd(collName, true);
+            return new BsonDocument("ok", 1);
+        }
+
         GetOrCreateStore(collName);
         _explicitlyCreated.TryAdd(collName, true);
 

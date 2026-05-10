@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.36] - 2026-05-10
+
+### Fixed
+- `DropCollection` SDK path now removes all metadata (views, validators, timeseries options) — previously only removed stores and `_explicitlyCreated`, leaking stale metadata
+- `RunCommand` `create` with `viewOn` now properly registers the view — previously created a regular collection, ignoring the view pipeline
+- `Aggregate` on a view now applies the view pipeline and TTL eviction — previously bypassed `GetStoreDocuments()` and used raw `_store.GetAll()`
+- Schema validation (`ValidateDocument`) is now enforced on all write paths: `InsertOne`, `InsertMany`, `ReplaceOne`, `UpdateOne`, `UpdateMany`, `FindOneAndReplace`, `FindOneAndUpdate`, `BulkWrite` — previously only index uniqueness was validated
+- `RenameCollection` now migrates validators, views, and timeseries metadata to the new name — previously lost all metadata on rename
+
+### Added
+- 7 new integration tests covering DropCollection metadata cleanup, Aggregate on views, schema validation enforcement on writes, and RenameCollection metadata migration
+
 ## [0.11.33] - 2026-05-11
 
 ### Fixed

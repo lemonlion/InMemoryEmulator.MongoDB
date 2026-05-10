@@ -91,6 +91,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         FaultInjector?.Invoke("insert", bson);
         DocumentStore.EnsureId(bson);
         _indexManager.ValidateDocument(bson);
+        ValidateSchemaOnWrite(bson);
         _store.Insert(bson);
         OperationLog.Record(new OperationRecord { Type = "InsertOne", Document = bson.DeepClone().AsBsonDocument });
 
@@ -141,6 +142,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                 var bson = SerializeDocument(docList[i]);
                 DocumentStore.EnsureId(bson);
                 _indexManager.ValidateDocument(bson);
+                ValidateSchemaOnWrite(bson);
                 _store.Insert(bson);
                 WriteBackId(docList[i], bson);
                 // Ref: https://www.mongodb.com/docs/manual/changeStreams/
@@ -481,6 +483,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
             {
                 DocumentStore.EnsureId(replacementBson);
                 _indexManager.ValidateDocument(replacementBson);
+                ValidateSchemaOnWrite(replacementBson);
                 var doc = _store.Insert(replacementBson);
                 PublishChangeEvent(ChangeStreamOperationType.Insert, doc);
                 var upsertedId = doc["_id"];
@@ -500,6 +503,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
 
         replacementBson["_id"] = targetId;
         _indexManager.ValidateDocument(replacementBson, excludeId: targetId);
+        ValidateSchemaOnWrite(replacementBson);
         var beforeChange = target.DeepClone().AsBsonDocument;
         var (_, modified) = _store.Replace(targetId, replacementBson);
 
@@ -565,6 +569,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                     arrayFilters: renderedArrayFilters);
                 DocumentStore.EnsureId(upsertResult);
                 _indexManager.ValidateDocument(upsertResult);
+                ValidateSchemaOnWrite(upsertResult);
                 var inserted = _store.Insert(upsertResult);
                 PublishChangeEvent(ChangeStreamOperationType.Insert, inserted);
                 return new UpdateResult.Acknowledged(0, 0, inserted["_id"]);
@@ -587,6 +592,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
             arrayFilters: renderedArrayFilters, matchedArrayIndex: matchedIdx, matchedArrayField: matchedField);
         previewDoc["_id"] = targetId;
         _indexManager.ValidateDocument(previewDoc, excludeId: targetId);
+        ValidateSchemaOnWrite(previewDoc);
 
         // Use DocumentStore.Update for atomic apply — prevents lost updates under concurrency
         var (matched, modified, beforeChange) = _store.Update(targetId, currentDoc =>
@@ -642,6 +648,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                     arrayFilters: renderedArrayFilters);
                 DocumentStore.EnsureId(upsertResult);
                 _indexManager.ValidateDocument(upsertResult);
+                ValidateSchemaOnWrite(upsertResult);
                 var inserted = _store.Insert(upsertResult);
                 PublishChangeEvent(ChangeStreamOperationType.Insert, inserted);
                 return new UpdateResult.Acknowledged(0, 0, inserted["_id"]);
@@ -663,6 +670,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                 arrayFilters: renderedArrayFilters, matchedArrayIndex: matchedIdx, matchedArrayField: matchedField);
             previewDoc["_id"] = targetId;
             _indexManager.ValidateDocument(previewDoc, excludeId: targetId);
+            ValidateSchemaOnWrite(previewDoc);
 
             // Use DocumentStore.Update for atomic apply and correct Update change type (not Replace)
             var (matched, modified, beforeChange) = _store.Update(targetId, currentDoc =>
@@ -785,6 +793,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
             {
                 DocumentStore.EnsureId(replacementBson);
                 _indexManager.ValidateDocument(replacementBson);
+                ValidateSchemaOnWrite(replacementBson);
                 var doc = _store.Insert(replacementBson);
                 PublishChangeEvent(ChangeStreamOperationType.Insert, doc);
                 if (options.ReturnDocument == ReturnDocument.After)
@@ -809,6 +818,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
 
         replacementBson["_id"] = targetId;
         _indexManager.ValidateDocument(replacementBson, excludeId: targetId);
+        ValidateSchemaOnWrite(replacementBson);
         var (_, wasModified) = _store.Replace(targetId, replacementBson);
         PublishChangeEvent(ChangeStreamOperationType.Replace, replacementBson, target);
 
@@ -873,6 +883,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                     arrayFilters: renderedArrayFilters);
                 DocumentStore.EnsureId(upsertResult);
                 _indexManager.ValidateDocument(upsertResult);
+                ValidateSchemaOnWrite(upsertResult);
                 var inserted = _store.Insert(upsertResult);
                 PublishChangeEvent(ChangeStreamOperationType.Insert, inserted);
                 if (options.ReturnDocument == ReturnDocument.After)
@@ -897,6 +908,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
             arrayFilters: renderedArrayFilters, matchedArrayIndex: matchedIdx, matchedArrayField: matchedField);
         previewDoc["_id"] = targetId;
         _indexManager.ValidateDocument(previewDoc, excludeId: targetId);
+        ValidateSchemaOnWrite(previewDoc);
 
         // Use DocumentStore.Update for atomic apply and correct Update change type
         var (matched, modified, beforeChange) = _store.Update(targetId, currentDoc =>
@@ -969,7 +981,9 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         };
 
         // Get all documents from this collection as input
-        var input = _store.GetAll().Select(d => d.DeepClone().AsBsonDocument);
+        // Ref: https://www.mongodb.com/docs/manual/core/views/
+        //   "When clients query a view, MongoDB appends the client query to the underlying pipeline."
+        var input = GetStoreDocuments().Select(d => d.DeepClone().AsBsonDocument);
 
         // Execute the pipeline
         var results = AggregationPipelineExecutor.Execute(input, stages, context).ToList();
@@ -1123,6 +1137,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                         var bson = SerializeDocument(insert.Document);
                         DocumentStore.EnsureId(bson);
                         _indexManager.ValidateDocument(bson);
+                        ValidateSchemaOnWrite(bson);
                         var insertedDoc = _store.Insert(bson);
                         PublishChangeEvent(ChangeStreamOperationType.Insert, insertedDoc);
                         WriteBackId(insert.Document, bson);
@@ -1600,6 +1615,21 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
     /// Writes the generated _id value back to the source document.
     /// The real MongoDB driver does this automatically during InsertOne.
     /// </summary>
+    /// <summary>
+    /// Validates a document against the collection's schema validator.
+    /// </summary>
+    /// <remarks>
+    /// Ref: https://www.mongodb.com/docs/manual/core/schema-validation/
+    ///   "MongoDB can apply validation rules during inserts and updates."
+    /// </remarks>
+    private void ValidateSchemaOnWrite(BsonDocument doc)
+    {
+        if (Database is InMemoryMongoDatabase db)
+        {
+            db.ValidateDocument(CollectionNamespace.CollectionName, doc);
+        }
+    }
+
     private void WriteBackId(TDocument document, BsonDocument bson)
     {
         if (document is BsonDocument) return; // BsonDocument already has the _id
