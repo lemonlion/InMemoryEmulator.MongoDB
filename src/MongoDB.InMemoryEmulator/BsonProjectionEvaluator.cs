@@ -285,10 +285,28 @@ internal static class BsonProjectionEvaluator
         var array = doc[field].AsBsonArray;
         foreach (var element in array)
         {
-            if (element.IsBsonDocument && BsonFilterEvaluator.Matches(element.AsBsonDocument, filter))
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/projection/elemMatch/
+            //   "Projects the first element in an array that matches the specified $elemMatch condition."
+            //   Works with both document and scalar array elements.
+            if (element.IsBsonDocument)
             {
-                result[field] = new BsonArray { element };
-                return;
+                if (BsonFilterEvaluator.Matches(element.AsBsonDocument, filter))
+                {
+                    result[field] = new BsonArray { element };
+                    return;
+                }
+            }
+            else
+            {
+                // For scalar elements, wrap in a temporary document and match against the filter
+                // treating the filter operators as applying to the element value directly.
+                var wrapper = new BsonDocument("_v", element);
+                var wrappedFilter = new BsonDocument("_v", filter);
+                if (BsonFilterEvaluator.Matches(wrapper, wrappedFilter))
+                {
+                    result[field] = new BsonArray { element };
+                    return;
+                }
             }
         }
 

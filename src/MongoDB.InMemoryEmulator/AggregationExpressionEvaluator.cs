@@ -289,6 +289,8 @@ internal static class AggregationExpressionEvaluator
         // Check if any argument is a date
         BsonDateTime? dateArg = null;
         double numericSum = 0;
+        bool hasDouble = false;
+        bool hasLong = false;
         foreach (var v in arr)
         {
             if (v == BsonNull.Value) return BsonNull.Value;
@@ -301,13 +303,17 @@ internal static class AggregationExpressionEvaluator
             else
             {
                 numericSum += v.ToDouble();
+                if (v.BsonType == BsonType.Double || v.BsonType == BsonType.Decimal128) hasDouble = true;
+                else if (v.BsonType == BsonType.Int64) hasLong = true;
             }
         }
 
         if (dateArg != null)
             return new BsonDateTime(dateArg.ToUniversalTime().AddMilliseconds(numericSum));
 
-        return new BsonDouble(numericSum);
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/add/
+        //   Type promotion: integer → long → double → decimal
+        return WrapNumeric(numericSum, hasDouble, hasLong);
     }
 
     // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/subtract/
@@ -325,7 +331,7 @@ internal static class AggregationExpressionEvaluator
         {
             // Date - Date = difference in milliseconds
             var ms = (arr[0].AsBsonDateTime.ToUniversalTime() - arr[1].AsBsonDateTime.ToUniversalTime()).TotalMilliseconds;
-            return new BsonDouble(ms);
+            return new BsonInt64((long)ms);
         }
 
         if (firstIsDate)
@@ -334,19 +340,28 @@ internal static class AggregationExpressionEvaluator
             return new BsonDateTime(arr[0].AsBsonDateTime.ToUniversalTime().AddMilliseconds(-arr[1].ToDouble()));
         }
 
-        return new BsonDouble(arr[0].ToDouble() - arr[1].ToDouble());
+        bool hasDouble = arr[0].BsonType == BsonType.Double || arr[0].BsonType == BsonType.Decimal128
+                      || arr[1].BsonType == BsonType.Double || arr[1].BsonType == BsonType.Decimal128;
+        bool hasLong = arr[0].BsonType == BsonType.Int64 || arr[1].BsonType == BsonType.Int64;
+        return WrapNumeric(arr[0].ToDouble() - arr[1].ToDouble(), hasDouble, hasLong);
     }
 
     private static BsonValue EvalMultiply(BsonDocument doc, BsonValue args, BsonDocument? variables)
     {
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/multiply/
+        //   Type promotion: integer → long → double → decimal
         var arr = EvalArray(doc, args, variables);
         double product = 1;
+        bool hasDouble = false;
+        bool hasLong = false;
         foreach (var v in arr)
         {
             if (v == BsonNull.Value) return BsonNull.Value;
             product *= v.ToDouble();
+            if (v.BsonType == BsonType.Double || v.BsonType == BsonType.Decimal128) hasDouble = true;
+            else if (v.BsonType == BsonType.Int64) hasLong = true;
         }
-        return new BsonDouble(product);
+        return WrapNumeric(product, hasDouble, hasLong);
     }
 
     private static BsonValue EvalDivide(BsonDocument doc, BsonValue args, BsonDocument? variables)
@@ -360,9 +375,28 @@ internal static class AggregationExpressionEvaluator
 
     private static BsonValue EvalMod(BsonDocument doc, BsonValue args, BsonDocument? variables)
     {
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/mod/
+        //   Preserves type: integer % integer → integer
         var arr = EvalArray(doc, args, variables);
         if (arr[0] == BsonNull.Value || arr[1] == BsonNull.Value) return BsonNull.Value;
-        return new BsonDouble(arr[0].ToDouble() % arr[1].ToDouble());
+        bool hasDouble = arr[0].BsonType == BsonType.Double || arr[0].BsonType == BsonType.Decimal128
+                      || arr[1].BsonType == BsonType.Double || arr[1].BsonType == BsonType.Decimal128;
+        bool hasLong = arr[0].BsonType == BsonType.Int64 || arr[1].BsonType == BsonType.Int64;
+        return WrapNumeric(arr[0].ToDouble() % arr[1].ToDouble(), hasDouble, hasLong);
+    }
+
+    /// <summary>
+    /// Wraps a numeric result in the appropriate BsonValue type based on input type promotion rules.
+    /// </summary>
+    /// <remarks>
+    /// Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/add/
+    ///   "Type promotion: integer → long → double → decimal"
+    /// </remarks>
+    private static BsonValue WrapNumeric(double value, bool hasDouble, bool hasLong)
+    {
+        if (hasDouble) return new BsonDouble(value);
+        if (hasLong) return new BsonInt64((long)value);
+        return new BsonInt32((int)value);
     }
 
     private static BsonValue EvalUnaryMath(BsonDocument doc, BsonValue args, BsonDocument? variables, Func<double, double> fn)

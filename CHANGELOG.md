@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.10] - 2026-05-11
+
+### Fixed
+- Aggregation arithmetic operators (`$add`, `$subtract`, `$multiply`, `$mod`) now preserve integer types (Int32/Int64) instead of always returning Double
+- `$subtract` on two dates now correctly returns Int64 (milliseconds) instead of Double
+- `$elemMatch` projection now works with scalar array elements (numbers, strings), not just embedded documents
+
+### Added
+- 12 new integration tests covering arithmetic type preservation, $elemMatch scalar projection
+
 ## [0.11.9] - 2026-05-11
 
 ### Fixed
