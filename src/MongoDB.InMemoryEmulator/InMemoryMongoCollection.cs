@@ -687,6 +687,9 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
     public TProjection FindOneAndDelete<TProjection>(FilterDefinition<TDocument> filter, FindOneAndDeleteOptions<TDocument, TProjection>? options = null, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var renderedFilter = RenderFilter(filter);
+        FaultInjector?.Invoke("findAndModify", renderedFilter);
+        OperationLog.Record(new OperationRecord { Type = "FindOneAndDelete", Filter = renderedFilter?.DeepClone().AsBsonDocument });
         var matches = FindInternalBson(filter);
 
         if (options?.Sort != null)

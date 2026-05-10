@@ -92,7 +92,7 @@ internal static class BsonUpdateEvaluator
 
                 // Ref: https://www.mongodb.com/docs/manual/reference/operator/update-bitwise/
                 case "$bit":
-                    ApplyBit(result, element.Value.AsBsonDocument);
+                    ApplyBit(result, element.Value.AsBsonDocument, ctx);
                     break;
 
                 default:
@@ -593,15 +593,38 @@ internal static class BsonUpdateEvaluator
 
     // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/bit/
     //   "Performs a bitwise AND, OR, or XOR update of a field."
-    private static void ApplyBit(BsonDocument doc, BsonDocument fields)
+    private static void ApplyBit(BsonDocument doc, BsonDocument fields, PositionalContext ctx)
     {
         foreach (var element in fields)
         {
+            if (HasPositionalOperator(element.Name))
+            {
+                var ops = element.Value.AsBsonDocument;
+                ApplyPositionalAction(doc, element.Name, ctx, (d, leaf) =>
+                {
+                    var cur = d.Contains(leaf) ? d[leaf] : new BsonInt32(0);
+                    long curVal = cur.IsInt64 ? cur.AsInt64 : cur.IsInt32 ? cur.AsInt32 : 0;
+                    foreach (var op in ops)
+                    {
+                        long operand = op.Value.IsInt64 ? op.Value.AsInt64 : op.Value.AsInt32;
+                        curVal = op.Name switch
+                        {
+                            "and" => curVal & operand,
+                            "or" => curVal | operand,
+                            "xor" => curVal ^ operand,
+                            _ => throw MongoErrors.BadValue($"Unknown bit operation: {op.Name}")
+                        };
+                    }
+                    d[leaf] = cur.IsInt64 ? new BsonInt64(curVal) : new BsonInt32((int)curVal);
+                });
+                continue;
+            }
+
             var current = ResolveFieldPath(doc, element.Name);
             long currentVal = current.IsInt64 ? current.AsInt64 : current.IsInt32 ? current.AsInt32 : 0;
 
-            var ops = element.Value.AsBsonDocument;
-            foreach (var op in ops)
+            var bitOps = element.Value.AsBsonDocument;
+            foreach (var op in bitOps)
             {
                 long operand = op.Value.IsInt64 ? op.Value.AsInt64 : op.Value.AsInt32;
                 currentVal = op.Name switch
@@ -654,7 +677,12 @@ internal static class BsonUpdateEvaluator
 
     /// <summary>
     /// Sets a value at a dot-notation path, creating intermediate documents as needed.
+    /// Handles numeric indices for array element access.
     /// </summary>
+    /// <remarks>
+    /// Ref: https://www.mongodb.com/docs/manual/reference/operator/update/set/#set-elements-in-arrays
+    ///   "To specify a field in an embedded document or in an array, use dot notation."
+    /// </remarks>
     internal static void SetFieldPath(BsonDocument doc, string path, BsonValue value)
     {
         if (!path.Contains('.'))
@@ -664,18 +692,41 @@ internal static class BsonUpdateEvaluator
         }
 
         var parts = path.Split('.');
-        var current = doc;
+        BsonValue current = doc;
 
         for (int i = 0; i < parts.Length - 1; i++)
         {
-            if (!current.Contains(parts[i]) || !current[parts[i]].IsBsonDocument)
+            if (current is BsonArray arr && int.TryParse(parts[i], out var idx))
             {
-                current[parts[i]] = new BsonDocument();
+                if (idx >= 0 && idx < arr.Count)
+                    current = arr[idx];
+                else
+                    return; // Index out of bounds — no-op
             }
-            current = current[parts[i]].AsBsonDocument;
+            else if (current is BsonDocument curDoc)
+            {
+                if (!curDoc.Contains(parts[i]) || (!curDoc[parts[i]].IsBsonDocument && !curDoc[parts[i]].IsBsonArray))
+                {
+                    curDoc[parts[i]] = new BsonDocument();
+                }
+                current = curDoc[parts[i]];
+            }
+            else
+            {
+                return; // Can't navigate further
+            }
         }
 
-        current[parts[^1]] = value;
+        var leaf = parts[^1];
+        if (current is BsonArray leafArr && int.TryParse(leaf, out var leafIdx))
+        {
+            if (leafIdx >= 0 && leafIdx < leafArr.Count)
+                leafArr[leafIdx] = value;
+        }
+        else if (current is BsonDocument leafDoc)
+        {
+            leafDoc[leaf] = value;
+        }
     }
 
     private static void RemoveFieldPath(BsonDocument doc, string path)

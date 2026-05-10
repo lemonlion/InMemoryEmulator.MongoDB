@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.14] - 2026-05-11
+
+### Fixed
+- `$bit` operator now supports positional operators (`$`, `$[]`, `$[identifier]`)
+- `SetFieldPath` now handles numeric array indices in dot-notation paths (e.g., `items.1.qty`) instead of overwriting them with subdocuments
+- `FindOneAndDelete` now records to `OperationLog` and invokes `FaultInjector` like other write operations
+- `$bucketAuto` aggregation stage now supports custom `output` accumulators instead of only returning `count`
+
+### Added
+- 7 new integration tests covering $bit with positional, numeric array indices, FindOneAndDelete operation logging, and $bucketAuto output
+
 ## [0.11.13] - 2026-05-11
 
 ### Fixed

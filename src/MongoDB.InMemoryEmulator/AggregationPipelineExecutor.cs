@@ -819,10 +819,13 @@ internal static class AggregationPipelineExecutor
     }
 
     // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/bucketAuto/
+    //   "output: A document that specifies the fields to include in the output documents
+    //    in addition to the _id field."
     private static IEnumerable<BsonDocument> ExecuteBucketAuto(IEnumerable<BsonDocument> input, BsonDocument spec)
     {
         var groupBy = spec["groupBy"];
         var buckets = spec["buckets"].AsInt32;
+        var outputSpec = spec.Contains("output") ? spec["output"].AsBsonDocument : null;
 
         var docs = input.ToList();
         var sorted = docs.OrderBy(d => AggregationExpressionEvaluator.Evaluate(d, groupBy), BsonValueComparer.Instance).ToList();
@@ -843,6 +846,13 @@ internal static class AggregationPipelineExecutor
                 { "_id", new BsonDocument { { "min", minVal }, { "max", maxVal } } },
                 { "count", chunk.Count }
             };
+
+            if (outputSpec != null)
+            {
+                result.Remove("count");
+                ApplyBucketOutput(result, chunk, outputSpec);
+            }
+
             yield return result;
         }
     }
