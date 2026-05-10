@@ -157,7 +157,11 @@ internal static class AggregationPipelineExecutor
                     if (innerDoc.ElementCount > 0 && innerDoc.Names.First().StartsWith("$"))
                     {
                         // Expression
-                        result[el.Name] = AggregationExpressionEvaluator.Evaluate(doc, el.Value);
+                        var exprResult = AggregationExpressionEvaluator.Evaluate(doc, el.Value);
+                        // Ref: https://www.mongodb.com/docs/manual/reference/aggregation-variables/
+                        //   "$$REMOVE ... Allows for the exclusion of fields in ... $project stages."
+                        if (!AggregationExpressionEvaluator.IsRemove(exprResult))
+                            result[el.Name] = exprResult;
                     }
                     else
                     {
@@ -172,7 +176,9 @@ internal static class AggregationPipelineExecutor
                 else if (el.Value is BsonString strVal && strVal.Value.StartsWith("$"))
                 {
                     // Field expression like "$fieldName"
-                    result[el.Name] = AggregationExpressionEvaluator.Evaluate(doc, el.Value);
+                    var exprResult = AggregationExpressionEvaluator.Evaluate(doc, el.Value);
+                    if (!AggregationExpressionEvaluator.IsRemove(exprResult))
+                        result[el.Name] = exprResult;
                 }
                 else if (el.Value.ToBoolean())
                 {
@@ -206,7 +212,13 @@ internal static class AggregationPipelineExecutor
             foreach (var el in spec)
             {
                 var val = AggregationExpressionEvaluator.Evaluate(doc, el.Value);
-                SetFieldPath(clone, el.Name, val);
+                // Ref: https://www.mongodb.com/docs/manual/reference/aggregation-variables/
+                //   "$$REMOVE evaluates to the missing value. Allows for the exclusion of fields
+                //    in $addFields and $project stages."
+                if (AggregationExpressionEvaluator.IsRemove(val))
+                    RemoveFieldPath(clone, el.Name);
+                else
+                    SetFieldPath(clone, el.Name, val);
             }
             return clone;
         });

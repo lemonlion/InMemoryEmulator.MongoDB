@@ -143,6 +143,9 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                 _indexManager.ValidateDocument(bson);
                 _store.Insert(bson);
                 WriteBackId(docList[i], bson);
+                // Ref: https://www.mongodb.com/docs/manual/changeStreams/
+                //   Change streams report insertions whether from InsertOne or InsertMany.
+                PublishChangeEvent(ChangeStreamOperationType.Insert, bson);
             }
             catch (MongoWriteException ex) when (!isOrdered)
             {

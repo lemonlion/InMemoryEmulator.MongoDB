@@ -16,6 +16,22 @@ namespace MongoDB.InMemoryEmulator;
 internal static class AggregationExpressionEvaluator
 {
     /// <summary>
+    /// Sentinel value for $$REMOVE — indicates the field should be excluded from the output.
+    /// Distinguished from BsonNull.Value because null fields are included, but $$REMOVE fields are omitted.
+    /// </summary>
+    /// <remarks>
+    /// Ref: https://www.mongodb.com/docs/manual/reference/aggregation-variables/
+    ///   "$$REMOVE evaluates to the missing value. Allows for the exclusion of fields
+    ///    in $addFields and $project stages."
+    /// </remarks>
+    internal static readonly BsonValue RemoveSentinel = new BsonString("$$__REMOVE_SENTINEL__$$");
+
+    /// <summary>
+    /// Returns true if the value is the $$REMOVE sentinel.
+    /// </summary>
+    internal static bool IsRemove(BsonValue value) => ReferenceEquals(value, RemoveSentinel);
+
+    /// <summary>
     /// Evaluate an expression against a document, returning the resulting BsonValue.
     /// </summary>
     internal static BsonValue Evaluate(BsonDocument doc, BsonValue expr, BsonDocument? variables = null)
@@ -101,9 +117,9 @@ internal static class AggregationExpressionEvaluator
             "$concat" => EvalConcat(doc, args, variables),
             "$toLower" => EvalStringUnary(doc, args, variables, s => s.ToLowerInvariant()),
             "$toUpper" => EvalStringUnary(doc, args, variables, s => s.ToUpperInvariant()),
-            "$trim" => EvalTrim(doc, args, variables, s => s.Trim()),
-            "$ltrim" => EvalTrim(doc, args, variables, s => s.TrimStart()),
-            "$rtrim" => EvalTrim(doc, args, variables, s => s.TrimEnd()),
+            "$trim" => EvalTrim(doc, args, variables, s => s.Trim(), (s, c) => s.Trim(c)),
+            "$ltrim" => EvalTrim(doc, args, variables, s => s.TrimStart(), (s, c) => s.TrimStart(c)),
+            "$rtrim" => EvalTrim(doc, args, variables, s => s.TrimEnd(), (s, c) => s.TrimEnd(c)),
             "$substr" or "$substrBytes" => EvalSubstr(doc, args, variables),
             "$substrCP" => EvalSubstr(doc, args, variables),
             "$strLenBytes" => EvalStrLen(doc, args, variables, s => Encoding.UTF8.GetByteCount(s)),
@@ -243,7 +259,7 @@ internal static class AggregationExpressionEvaluator
             "CURRENT" => doc,
             "NOW" => new BsonDateTime(DateTime.UtcNow),
             "CLUSTER_TIME" => new BsonTimestamp((int)DateTimeOffset.UtcNow.ToUnixTimeSeconds(), 1),
-            "REMOVE" => BsonNull.Value, // Special sentinel
+            "REMOVE" => RemoveSentinel, // Special sentinel — must be distinguished from null
             // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/redact/
             //   "$$KEEP, $$PRUNE, $$DESCEND are system variables used by $redact."
             "KEEP" => new BsonString("$$KEEP"),
@@ -406,7 +422,8 @@ internal static class AggregationExpressionEvaluator
         return new BsonString(fn(val.AsString));
     }
 
-    private static BsonValue EvalTrim(BsonDocument doc, BsonValue args, BsonDocument? variables, Func<string, string> fn)
+    private static BsonValue EvalTrim(BsonDocument doc, BsonValue args, BsonDocument? variables,
+        Func<string, string> fn, Func<string, char[], string> fnWithChars)
     {
         if (args.IsBsonDocument)
         {
@@ -416,8 +433,12 @@ internal static class AggregationExpressionEvaluator
             var str = input.AsString;
             if (spec.Contains("chars"))
             {
+                // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/ltrim/
+                //   "$ltrim removes characters from the beginning of a string."
+                // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/rtrim/
+                //   "$rtrim removes characters from the end of a string."
                 var chars = Evaluate(doc, spec["chars"], variables).AsString.ToCharArray();
-                return new BsonString(str.Trim(chars));
+                return new BsonString(fnWithChars(str, chars));
             }
             return new BsonString(fn(str));
         }
@@ -497,13 +518,22 @@ internal static class AggregationExpressionEvaluator
         return new BsonString(input.AsString.Replace(find, replacement));
     }
 
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/regexMatch/
+    //   "regex: The regular expression. Can be specified as a string pattern or as a regex object."
+    private static (string pattern, string options) ExtractRegex(BsonDocument spec, BsonDocument? variables)
+    {
+        var regexVal = spec["regex"];
+        if (regexVal is BsonRegularExpression bre)
+            return (bre.Pattern, spec.Contains("options") ? spec["options"].AsString : bre.Options);
+        return (regexVal.AsString, spec.GetValue("options", "").AsString);
+    }
+
     private static BsonValue EvalRegexMatch(BsonDocument doc, BsonValue args, BsonDocument? variables)
     {
         var spec = args.AsBsonDocument;
         var input = Evaluate(doc, spec["input"], variables);
         if (input == BsonNull.Value) return BsonNull.Value;
-        var regex = spec["regex"].AsString;
-        var opts = spec.GetValue("options", "").AsString;
+        var (regex, opts) = ExtractRegex(spec, variables);
         var ro = ParseRegexOptions(opts);
         return (BsonBoolean)Regex.IsMatch(input.AsString, regex, ro);
     }
@@ -513,8 +543,7 @@ internal static class AggregationExpressionEvaluator
         var spec = args.AsBsonDocument;
         var input = Evaluate(doc, spec["input"], variables);
         if (input == BsonNull.Value) return BsonNull.Value;
-        var regex = spec["regex"].AsString;
-        var opts = spec.GetValue("options", "").AsString;
+        var (regex, opts) = ExtractRegex(spec, variables);
         var m = Regex.Match(input.AsString, regex, ParseRegexOptions(opts));
         if (!m.Success) return BsonNull.Value;
         return new BsonDocument { { "match", m.Value }, { "idx", m.Index }, { "captures", new BsonArray() } };
@@ -525,8 +554,7 @@ internal static class AggregationExpressionEvaluator
         var spec = args.AsBsonDocument;
         var input = Evaluate(doc, spec["input"], variables);
         if (input == BsonNull.Value) return new BsonArray();
-        var regex = spec["regex"].AsString;
-        var opts = spec.GetValue("options", "").AsString;
+        var (regex, opts) = ExtractRegex(spec, variables);
         var matches = Regex.Matches(input.AsString, regex, ParseRegexOptions(opts));
         var result = new BsonArray();
         foreach (Match m in matches)
@@ -883,8 +911,19 @@ internal static class AggregationExpressionEvaluator
     {
         var spec = args.AsBsonDocument;
         var input = Evaluate(doc, spec["input"], variables);
-        var to = Evaluate(doc, spec["to"], variables).AsString;
+        var toVal = Evaluate(doc, spec["to"], variables);
         var onError = spec.Contains("onError") ? spec["onError"] : null;
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/convert/
+        //   "onNull: The value to return if the input is null or missing."
+        var onNull = spec.Contains("onNull") ? spec["onNull"] : null;
+
+        if (input == BsonNull.Value)
+            return onNull != null ? Evaluate(doc, onNull, variables) : BsonNull.Value;
+
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/convert/
+        //   "to: Can be any valid expression that resolves to one of the following numeric
+        //    or string identifiers."
+        var to = toVal.IsNumeric ? BsonTypeCodeToName(toVal.ToInt32()) : toVal.AsString;
         try
         {
             return ConvertTo(input, to);
@@ -895,6 +934,21 @@ internal static class AggregationExpressionEvaluator
             throw;
         }
     }
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/convert/
+    //   "to: ... numeric BSON type identifiers."
+    private static string BsonTypeCodeToName(int code) => code switch
+    {
+        1 => "double",
+        2 => "string",
+        7 => "objectId",
+        8 => "bool",
+        9 => "date",
+        16 => "int",
+        18 => "long",
+        19 => "decimal",
+        _ => throw MongoErrors.BadValue($"Unknown BSON type code: {code}")
+    };
 
     private static BsonValue ConvertTo(BsonValue input, string type)
     {
@@ -999,7 +1053,12 @@ internal static class AggregationExpressionEvaluator
         var netFormat = format
             .Replace("%Y", "yyyy").Replace("%m", "MM").Replace("%d", "dd")
             .Replace("%H", "HH").Replace("%M", "mm").Replace("%S", "ss")
-            .Replace("%L", "fff").Replace("%j", "DDD").Replace("%Z", "zzz");
+            .Replace("%L", "fff").Replace("%Z", "zzz");
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/dateToString/
+        //   "%j: Day of year (3 digits, zero padded). Valid values: 001-366."
+        //   .NET has no built-in single format specifier for day-of-year, so we handle it manually.
+        if (netFormat.Contains("%j"))
+            netFormat = netFormat.Replace("%j", dt.DayOfYear.ToString("D3"));
         return new BsonString(dt.ToString(netFormat, CultureInfo.InvariantCulture));
     }
 
