@@ -181,6 +181,17 @@ internal static class AggregationExpressionEvaluator
             "$objectToArray" => EvalObjectToArray(doc, args, variables),
             "$arrayToObject" => EvalArrayToObject(doc, args, variables),
             "$zip" => EvalZip(doc, args, variables),
+            "$indexOfArray" => EvalIndexOfArray(doc, args, variables),
+
+            // Set operators
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/#set-expression-operators
+            "$setUnion" => EvalSetUnion(doc, args, variables),
+            "$setIntersection" => EvalSetIntersection(doc, args, variables),
+            "$setDifference" => EvalSetDifference(doc, args, variables),
+            "$setEquals" => EvalSetEquals(doc, args, variables),
+            "$setIsSubset" => EvalSetIsSubset(doc, args, variables),
+            "$anyElementTrue" => EvalAnyElementTrue(doc, args, variables),
+            "$allElementsTrue" => EvalAllElementsTrue(doc, args, variables),
 
             // Type
             "$type" => EvalType(doc, args, variables),
@@ -1054,6 +1065,152 @@ internal static class AggregationExpressionEvaluator
         }
         return result;
     }
+
+    /// <summary>
+    /// Implements $indexOfArray: searches an array for the first occurrence of a value.
+    /// </summary>
+    /// <remarks>
+    /// Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/indexOfArray/
+    ///   "Searches an array for an occurrence of a specified value and returns
+    ///    the array index of the first occurrence."
+    ///   Returns -1 if not found, null if array is null.
+    /// </remarks>
+    private static BsonValue EvalIndexOfArray(BsonDocument doc, BsonValue args, BsonDocument? variables)
+    {
+        var arr = args.AsBsonArray;
+        var arrayVal = Evaluate(doc, arr[0], variables);
+        if (arrayVal == BsonNull.Value) return BsonNull.Value;
+        if (!arrayVal.IsBsonArray)
+            throw MongoErrors.BadValue("$indexOfArray requires an array as the first argument");
+        var array = arrayVal.AsBsonArray;
+        var searchVal = Evaluate(doc, arr[1], variables);
+        int start = arr.Count > 2 ? (int)Evaluate(doc, arr[2], variables).ToInt64() : 0;
+        int end = arr.Count > 3 ? (int)Evaluate(doc, arr[3], variables).ToInt64() : array.Count;
+
+        if (start < 0 || start > array.Count) return new BsonInt32(-1);
+        if (end > array.Count) end = array.Count;
+
+        for (int i = start; i < end; i++)
+        {
+            if (BsonValueComparer.Instance.Compare(array[i], searchVal) == 0)
+                return new BsonInt32(i);
+        }
+        return new BsonInt32(-1);
+    }
+
+    #region Set Expression Operators
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/setUnion/
+    //   "Returns a set with elements that appear in any of the input sets."
+    private static BsonValue EvalSetUnion(BsonDocument doc, BsonValue args, BsonDocument? variables)
+    {
+        var arrays = args.AsBsonArray.Select(a => Evaluate(doc, a, variables)).ToList();
+        if (arrays.Any(a => a == BsonNull.Value)) return BsonNull.Value;
+        var resultSet = new List<BsonValue>();
+        var seen = new HashSet<BsonValue>(BsonValueComparer.Instance);
+        foreach (var arr in arrays)
+        {
+            if (!arr.IsBsonArray)
+                throw MongoErrors.BadValue("All operands of $setUnion must be arrays.");
+            foreach (var elem in arr.AsBsonArray)
+            {
+                if (seen.Add(elem))
+                    resultSet.Add(elem);
+            }
+        }
+        return new BsonArray(resultSet);
+    }
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/setIntersection/
+    //   "Returns a set with elements that appear in all of the input sets."
+    private static BsonValue EvalSetIntersection(BsonDocument doc, BsonValue args, BsonDocument? variables)
+    {
+        var arrays = args.AsBsonArray.Select(a => Evaluate(doc, a, variables)).ToList();
+        if (arrays.Any(a => a == BsonNull.Value)) return BsonNull.Value;
+        var sets = arrays.Select(a =>
+        {
+            if (!a.IsBsonArray)
+                throw MongoErrors.BadValue("All operands of $setIntersection must be arrays.");
+            return new HashSet<BsonValue>(a.AsBsonArray, BsonValueComparer.Instance);
+        }).ToList();
+        if (sets.Count == 0) return new BsonArray();
+        var intersection = sets[0];
+        for (int i = 1; i < sets.Count; i++)
+            intersection.IntersectWith(sets[i]);
+        return new BsonArray(intersection);
+    }
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/setDifference/
+    //   "Returns a set with elements that appear in the first set but not in the second set."
+    private static BsonValue EvalSetDifference(BsonDocument doc, BsonValue args, BsonDocument? variables)
+    {
+        var arr = args.AsBsonArray;
+        var first = Evaluate(doc, arr[0], variables);
+        var second = Evaluate(doc, arr[1], variables);
+        if (first == BsonNull.Value || second == BsonNull.Value) return BsonNull.Value;
+        if (!first.IsBsonArray || !second.IsBsonArray)
+            throw MongoErrors.BadValue("Both operands of $setDifference must be arrays.");
+        var secondSet = new HashSet<BsonValue>(second.AsBsonArray, BsonValueComparer.Instance);
+        var result = new BsonArray();
+        var seen = new HashSet<BsonValue>(BsonValueComparer.Instance);
+        foreach (var elem in first.AsBsonArray)
+        {
+            if (!secondSet.Contains(elem) && seen.Add(elem))
+                result.Add(elem);
+        }
+        return result;
+    }
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/setEquals/
+    //   "Returns true if the input sets have the same distinct elements."
+    private static BsonValue EvalSetEquals(BsonDocument doc, BsonValue args, BsonDocument? variables)
+    {
+        var arrays = args.AsBsonArray.Select(a => Evaluate(doc, a, variables)).ToList();
+        var sets = arrays.Select(a =>
+        {
+            if (!a.IsBsonArray)
+                throw MongoErrors.BadValue("All operands of $setEquals must be arrays.");
+            return new HashSet<BsonValue>(a.AsBsonArray, BsonValueComparer.Instance);
+        }).ToList();
+        if (sets.Count < 2) throw MongoErrors.BadValue("$setEquals requires at least two arguments.");
+        var first = sets[0];
+        return new BsonBoolean(sets.Skip(1).All(s => s.SetEquals(first)));
+    }
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/setIsSubset/
+    //   "Returns true if all elements of the first set appear in the second set."
+    private static BsonValue EvalSetIsSubset(BsonDocument doc, BsonValue args, BsonDocument? variables)
+    {
+        var arr = args.AsBsonArray;
+        var first = Evaluate(doc, arr[0], variables);
+        var second = Evaluate(doc, arr[1], variables);
+        if (!first.IsBsonArray || !second.IsBsonArray)
+            throw MongoErrors.BadValue("Both operands of $setIsSubset must be arrays.");
+        var secondSet = new HashSet<BsonValue>(second.AsBsonArray, BsonValueComparer.Instance);
+        return new BsonBoolean(first.AsBsonArray.All(e => secondSet.Contains(e)));
+    }
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/anyElementTrue/
+    //   "Returns true if any elements of a set evaluate to true."
+    private static BsonValue EvalAnyElementTrue(BsonDocument doc, BsonValue args, BsonDocument? variables)
+    {
+        var input = args is BsonArray arr ? Evaluate(doc, arr[0], variables) : Evaluate(doc, args, variables);
+        if (!input.IsBsonArray)
+            throw MongoErrors.BadValue("$anyElementTrue's argument must be an array.");
+        return new BsonBoolean(input.AsBsonArray.Any(e => IsTruthy(e)));
+    }
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/allElementsTrue/
+    //   "Returns true if no element of a set evaluates to false."
+    private static BsonValue EvalAllElementsTrue(BsonDocument doc, BsonValue args, BsonDocument? variables)
+    {
+        var input = args is BsonArray arr ? Evaluate(doc, arr[0], variables) : Evaluate(doc, args, variables);
+        if (!input.IsBsonArray)
+            throw MongoErrors.BadValue("$allElementsTrue's argument must be an array.");
+        return new BsonBoolean(input.AsBsonArray.All(e => IsTruthy(e)));
+    }
+
+    #endregion
 
     #endregion
 

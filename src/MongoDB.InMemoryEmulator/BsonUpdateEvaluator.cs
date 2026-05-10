@@ -1180,8 +1180,21 @@ internal static class BsonUpdateEvaluator
                 }
                 else
                 {
-                    // Direct value match
-                    matches = arr[i].Equals(el.Value);
+                    // Direct value match or query operator match on scalar array element
+                    // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/positional/
+                    //   "The positional $ operator acts as a placeholder for the first element
+                    //    that matches the query document."
+                    if (el.Value.IsBsonDocument && el.Value.AsBsonDocument.Names.Any(n => n.StartsWith("$")))
+                    {
+                        // Query operator condition (e.g., { scores: { $gte: 8 } })
+                        var wrapperDoc = new BsonDocument(el.Name, arr[i]);
+                        var filterDoc = new BsonDocument(el.Name, el.Value);
+                        matches = BsonFilterEvaluator.Matches(wrapperDoc, filterDoc);
+                    }
+                    else
+                    {
+                        matches = arr[i].Equals(el.Value);
+                    }
                 }
 
                 if (matches)

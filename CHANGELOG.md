@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.37] - 2026-05-10
+
+### Fixed
+- Positional `$` update operator now works with query operators (`$gte`, `$in`, etc.) on scalar arrays — previously only matched exact equality
+- `FindMatchedArrayIndex` now uses `BsonFilterEvaluator.Matches` for query operator conditions instead of direct `.Equals()`
+
+### Added
+- `$indexOfArray` aggregation expression operator — searches array for first occurrence of a value with optional start/end bounds
+- 7 set expression operators: `$setUnion`, `$setIntersection`, `$setDifference`, `$setEquals`, `$setIsSubset`, `$anyElementTrue`, `$allElementsTrue`
+- 14 new integration tests covering positional $ with query operators, $push/$addToSet missing field behavior, $indexOfArray, and all set operators
+
 ## [0.11.36] - 2026-05-10
 
 ### Fixed
