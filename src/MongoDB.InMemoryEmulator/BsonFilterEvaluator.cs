@@ -179,8 +179,16 @@ internal static class BsonFilterEvaluator
             // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/all/
             //   "The $all operator selects the documents where the value of a field is an array
             //    that contains all the specified elements."
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/all/
+            //   "Use $all with $elemMatch to match documents where the array field contains
+            //    at least one element that matches each $elemMatch condition."
             "$all" => fieldExists && fieldValue is BsonArray allArr &&
-                      operand.AsBsonArray.All(required => allArr.Any(el => el.Equals(required))),
+                      operand.AsBsonArray.All(required =>
+                      {
+                          if (required is BsonDocument reqDoc && reqDoc.ElementCount == 1 && reqDoc.GetElement(0).Name == "$elemMatch")
+                              return MatchesElemMatch(fieldValue, reqDoc["$elemMatch"].AsBsonDocument);
+                          return allArr.Any(el => el.Equals(required));
+                      }),
 
             // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/elemMatch/
             //   "The $elemMatch operator matches documents that contain an array field with at least
@@ -461,7 +469,10 @@ internal static class BsonFilterEvaluator
         if (!fieldValue.IsNumeric) return false;
         var divisor = operand[0].ToDouble();
         var remainder = operand[1].ToDouble();
-        return Math.Abs(fieldValue.ToDouble() % divisor - remainder) < 0.0001;
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/mod/
+        //   "Select documents where the value of a field divided by a divisor has the specified remainder."
+        //   MongoDB uses exact comparison, not fuzzy tolerance.
+        return fieldValue.ToDouble() % divisor == remainder;
     }
 
     private static bool MatchesBits(BsonValue fieldValue, BsonValue bitmask, string mode)

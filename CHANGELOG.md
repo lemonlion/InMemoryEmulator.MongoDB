@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.23] - 2026-05-11
+
+### Fixed
+- `BulkWrite` with `ordered:false` now correctly reports write errors via `MongoBulkWriteException` — previously silently swallowed errors and returned success
+- `$all` query operator now supports nested `$elemMatch` expressions (`{$all: [{$elemMatch: {...}}]}`) — previously only did literal equality matching
+- `$mod` query operator now uses exact comparison instead of fuzzy tolerance (0.0001) — previously could produce false positives for near-match remainders
+
+### Added
+- 4 new integration tests covering BulkWrite unordered error reporting, `$all` with `$elemMatch`, and `$mod` exact comparison
+
 ## [0.11.22] - 2026-05-11
 
 ### Fixed

@@ -1083,6 +1083,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         long deletedCount = 0;
         var upserts = new List<BulkWriteUpsert>();
         var processedRequests = new List<WriteModel<TDocument>>();
+        var errors = new List<BulkWriteError>();
 
         for (int i = 0; i < requestList.Count; i++)
         {
@@ -1141,10 +1142,29 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                         break;
                 }
             }
-            catch (MongoWriteException) when (!isOrdered)
+            catch (MongoWriteException ex) when (!isOrdered)
             {
-                // In unordered mode, continue processing remaining requests
+                // Ref: https://www.mongodb.com/docs/manual/reference/method/db.collection.bulkWrite/
+                //   "unordered operations that result in errors will still report the errors."
+                errors.Add(MongoErrors.CreateBulkWriteError(i, ServerErrorCategory.DuplicateKey, 11000, ex.Message));
             }
+        }
+
+        if (errors.Count > 0)
+        {
+            throw new MongoBulkWriteException<TDocument>(
+                MongoErrors.SyntheticConnectionId,
+                result: new BulkWriteResult<TDocument>.Acknowledged(
+                    requestCount: processedRequests.Count,
+                    matchedCount: matchedCount,
+                    deletedCount: deletedCount,
+                    insertedCount: insertedCount,
+                    modifiedCount: modifiedCount,
+                    processedRequests: processedRequests,
+                    upserts: upserts),
+                writeErrors: errors,
+                writeConcernError: null,
+                unprocessedRequests: new List<WriteModel<TDocument>>());
         }
 
         return MongoErrors.CreateBulkWriteResult<TDocument>(
