@@ -1036,23 +1036,30 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
 
         foreach (var doc in matches)
         {
-            var val = BsonFilterEvaluator.ResolveFieldPath(doc, fieldName);
-
             // Ref: https://www.mongodb.com/docs/manual/reference/command/distinct/
             //   "If the value of the specified field is an array, distinct considers each element
             //    of the array as a separate value."
             //   Null values (explicit null or missing field) are included once.
-            var elements = val is BsonArray arr ? arr.Values : new[] { val };
-            foreach (var element in elements)
-            {
-                if (!seen.Add(element)) continue;
+            // Ref: https://www.mongodb.com/docs/manual/core/document/#dot-notation
+            //   Dot-notation traverses arrays of subdocuments.
+            var allValues = fieldName.Contains('.')
+                ? BsonFilterEvaluator.ResolveFieldPathThroughArrays(doc, fieldName)
+                : new List<BsonValue> { BsonFilterEvaluator.ResolveFieldPath(doc, fieldName) };
 
-                if (typeof(TField) == typeof(BsonValue))
-                    results.Add((TField)(object)element);
-                else if (element == BsonNull.Value || element.IsBsonNull)
-                    results.Add(default!);
-                else
-                    results.Add((TField)BsonTypeMapper.MapToDotNetValue(element));
+            foreach (var val in allValues)
+            {
+                var elements = val is BsonArray arr ? arr.Values : new[] { val };
+                foreach (var element in elements)
+                {
+                    if (!seen.Add(element)) continue;
+
+                    if (typeof(TField) == typeof(BsonValue))
+                        results.Add((TField)(object)element);
+                    else if (element == BsonNull.Value || element.IsBsonNull)
+                        results.Add(default!);
+                    else
+                        results.Add((TField)BsonTypeMapper.MapToDotNetValue(element));
+                }
             }
         }
 

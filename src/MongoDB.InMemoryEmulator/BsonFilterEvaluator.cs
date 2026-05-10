@@ -300,6 +300,13 @@ internal static class BsonFilterEvaluator
     private static bool MatchesType(BsonValue fieldValue, BsonValue typeSpec)
     {
         // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/type/
+        //   "$type can also accept an array of types to check."
+        //   Handle array of type specifiers first, delegating each to MatchesType
+        //   so that the "array" type check is handled correctly per element.
+        if (typeSpec is BsonArray typeArr)
+            return typeArr.Any(t => MatchesType(fieldValue, t));
+
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/type/
         //   "If the field holds an array, $type returns documents in which at least
         //    one array element matches the specified BSON type."
         if (fieldValue is BsonArray array && !IsTypeCheckForArray(typeSpec))
@@ -414,6 +421,67 @@ internal static class BsonFilterEvaluator
             }
         }
         return current;
+    }
+
+    /// <summary>
+    /// Resolves a dot-notation field path, traversing arrays of subdocuments.
+    /// Returns all leaf values found across array elements.
+    /// </summary>
+    /// <remarks>
+    /// Ref: https://www.mongodb.com/docs/manual/core/document/#dot-notation
+    ///   "MongoDB uses the dot notation to access the elements of an array
+    ///    and to access the fields of an embedded document."
+    ///   When a path segment reaches an array of documents, each document
+    ///   is checked for the remaining path segments.
+    /// </remarks>
+    internal static List<BsonValue> ResolveFieldPathThroughArrays(BsonDocument doc, string path)
+    {
+        var results = new List<BsonValue>();
+        ResolveFieldPathThroughArraysRecursive(doc, path.Split('.'), 0, results);
+        return results;
+    }
+
+    private static void ResolveFieldPathThroughArraysRecursive(BsonValue current, string[] parts, int index, List<BsonValue> results)
+    {
+        if (index >= parts.Length)
+        {
+            results.Add(current);
+            return;
+        }
+
+        var part = parts[index];
+
+        if (current is BsonDocument nested)
+        {
+            if (!nested.Contains(part))
+            {
+                results.Add(BsonNull.Value);
+                return;
+            }
+            ResolveFieldPathThroughArraysRecursive(nested[part], parts, index + 1, results);
+        }
+        else if (current is BsonArray array)
+        {
+            if (int.TryParse(part, out var arrIndex))
+            {
+                if (arrIndex < array.Count)
+                    ResolveFieldPathThroughArraysRecursive(array[arrIndex], parts, index + 1, results);
+                else
+                    results.Add(BsonNull.Value);
+            }
+            else
+            {
+                // Non-numeric path through array: traverse each element
+                foreach (var element in array)
+                {
+                    ResolveFieldPathThroughArraysRecursive(element, parts, index, results);
+                }
+            }
+        }
+        else
+        {
+            results.Add(BsonNull.Value);
+        }
     }
 
     internal static bool FieldExists(BsonDocument doc, string path)

@@ -64,6 +64,23 @@ internal static class BsonSortEvaluator
     {
         var value = BsonFilterEvaluator.ResolveFieldPath(doc, path);
 
+        // Ref: https://www.mongodb.com/docs/manual/core/document/#dot-notation
+        //   Dot-notation traverses arrays of subdocuments. Collect all values
+        //   reached through array traversal to use for multikey sort comparison.
+        if (value == BsonNull.Value && path.Contains('.'))
+        {
+            var allValues = BsonFilterEvaluator.ResolveFieldPathThroughArrays(doc, path);
+            // Filter out BsonNull placeholders from missing sub-paths
+            var nonNull = allValues.Where(v => v != BsonNull.Value && !v.IsBsonNull).ToList();
+            if (nonNull.Count > 0)
+            {
+                return direction == 1
+                    ? nonNull.OrderBy(x => x, BsonValueComparer.Instance).First()
+                    : nonNull.OrderByDescending(x => x, BsonValueComparer.Instance).First();
+            }
+            return BsonNull.Value;
+        }
+
         if (value is BsonArray array && array.Count > 0)
         {
             return direction == 1
