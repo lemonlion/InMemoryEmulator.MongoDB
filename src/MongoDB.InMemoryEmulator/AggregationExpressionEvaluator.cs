@@ -506,6 +506,9 @@ internal static class AggregationExpressionEvaluator
     {
         var arr = EvalArray(doc, args, variables);
         if (arr[0] == BsonNull.Value) return BsonNull.Value;
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/indexOfBytes/
+        //   "Returns null if the first argument is null or missing."
+        if (arr[1] == BsonNull.Value) return BsonNull.Value;
         var str = arr[0].AsString;
         var sub = arr[1].AsString;
         int start = arr.Count > 2 ? arr[2].ToInt32() : 0;
@@ -517,7 +520,9 @@ internal static class AggregationExpressionEvaluator
     private static BsonValue EvalSplit(BsonDocument doc, BsonValue args, BsonDocument? variables)
     {
         var arr = EvalArray(doc, args, variables);
-        if (arr[0] == BsonNull.Value) return BsonNull.Value;
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/split/
+        //   "Returns null if either argument is null."
+        if (arr[0] == BsonNull.Value || arr[1] == BsonNull.Value) return BsonNull.Value;
         var parts = arr[0].AsString.Split(arr[1].AsString);
         return new BsonArray(parts.Select(p => new BsonString(p)));
     }
@@ -527,7 +532,10 @@ internal static class AggregationExpressionEvaluator
         var arr = EvalArray(doc, args, variables);
         // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/strcasecmp/
         //   "Returns 1, 0, or -1."
-        return new BsonInt32(Math.Sign(string.Compare(arr[0].AsString, arr[1].AsString, StringComparison.OrdinalIgnoreCase)));
+        //   Null/missing values are treated as empty string for comparison.
+        var s0 = arr[0] == BsonNull.Value ? "" : arr[0].AsString;
+        var s1 = arr[1] == BsonNull.Value ? "" : arr[1].AsString;
+        return new BsonInt32(Math.Sign(string.Compare(s0, s1, StringComparison.OrdinalIgnoreCase)));
     }
 
     private static BsonValue EvalReplaceOne(BsonDocument doc, BsonValue args, BsonDocument? variables)
@@ -535,11 +543,15 @@ internal static class AggregationExpressionEvaluator
         var spec = args.AsBsonDocument;
         var input = Evaluate(doc, spec["input"], variables);
         if (input == BsonNull.Value) return BsonNull.Value;
-        var find = Evaluate(doc, spec["find"], variables).AsString;
-        var replacement = Evaluate(doc, spec["replacement"], variables).AsString;
-        var idx = input.AsString.IndexOf(find, StringComparison.Ordinal);
+        var find = Evaluate(doc, spec["find"], variables);
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/replaceOne/
+        //   "Returns null if any argument resolves to null."
+        if (find == BsonNull.Value) return BsonNull.Value;
+        var replacement = Evaluate(doc, spec["replacement"], variables);
+        if (replacement == BsonNull.Value) return BsonNull.Value;
+        var idx = input.AsString.IndexOf(find.AsString, StringComparison.Ordinal);
         if (idx < 0) return input;
-        return new BsonString(input.AsString[..idx] + replacement + input.AsString[(idx + find.Length)..]);
+        return new BsonString(input.AsString[..idx] + replacement.AsString + input.AsString[(idx + find.AsString.Length)..]);
     }
 
     private static BsonValue EvalReplaceAll(BsonDocument doc, BsonValue args, BsonDocument? variables)
@@ -547,9 +559,13 @@ internal static class AggregationExpressionEvaluator
         var spec = args.AsBsonDocument;
         var input = Evaluate(doc, spec["input"], variables);
         if (input == BsonNull.Value) return BsonNull.Value;
-        var find = Evaluate(doc, spec["find"], variables).AsString;
-        var replacement = Evaluate(doc, spec["replacement"], variables).AsString;
-        return new BsonString(input.AsString.Replace(find, replacement));
+        var find = Evaluate(doc, spec["find"], variables);
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/replaceAll/
+        //   "Returns null if any argument resolves to null."
+        if (find == BsonNull.Value) return BsonNull.Value;
+        var replacement = Evaluate(doc, spec["replacement"], variables);
+        if (replacement == BsonNull.Value) return BsonNull.Value;
+        return new BsonString(input.AsString.Replace(find.AsString, replacement.AsString));
     }
 
     // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/regexMatch/

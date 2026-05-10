@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.20] - 2026-05-11
+
+### Fixed
+- `$split` aggregation expression now returns `null` when the delimiter argument is `null` — previously threw `InvalidOperationException`
+- `$strcasecmp` aggregation expression now treats `null` arguments as empty string — previously threw `InvalidOperationException`
+- `$replaceOne` aggregation expression now returns `null` when find or replacement argument is `null` — previously threw `InvalidOperationException`
+- `$replaceAll` aggregation expression now returns `null` when find or replacement argument is `null` — previously threw `InvalidOperationException`
+- `$indexOfBytes` aggregation expression now returns `null` when the substring argument is `null` — previously threw `InvalidOperationException`
+
+### Added
+- 7 new integration tests covering aggregation expression null handling for `$concat`, `$toUpper`, `$size`, `$split`, `$indexOfBytes`, `$replaceOne`, and `$strcasecmp`
+
 ## [0.11.19] - 2026-05-11
 
 ### Fixed
