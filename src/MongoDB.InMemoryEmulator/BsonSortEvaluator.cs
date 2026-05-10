@@ -33,14 +33,14 @@ internal static class BsonSortEvaluator
             if (ordered == null)
             {
                 ordered = direction == 1
-                    ? docs.OrderBy(d => ResolveField(d, field), BsonValueComparer.Instance)
-                    : docs.OrderByDescending(d => ResolveField(d, field), BsonValueComparer.Instance);
+                    ? docs.OrderBy(d => ResolveFieldForSort(d, field, direction), BsonValueComparer.Instance)
+                    : docs.OrderByDescending(d => ResolveFieldForSort(d, field, direction), BsonValueComparer.Instance);
             }
             else
             {
                 ordered = direction == 1
-                    ? ordered.ThenBy(d => ResolveField(d, field), BsonValueComparer.Instance)
-                    : ordered.ThenByDescending(d => ResolveField(d, field), BsonValueComparer.Instance);
+                    ? ordered.ThenBy(d => ResolveFieldForSort(d, field, direction), BsonValueComparer.Instance)
+                    : ordered.ThenByDescending(d => ResolveFieldForSort(d, field, direction), BsonValueComparer.Instance);
             }
         }
 
@@ -48,17 +48,29 @@ internal static class BsonSortEvaluator
     }
 
     /// <summary>
-    /// Resolves a dot-notation field path to a BsonValue.
+    /// Resolves a dot-notation field path to a BsonValue for sorting purposes.
+    /// For array fields, extracts the minimum element (ascending) or maximum element (descending).
     /// Returns BsonNull for missing fields (sorts missing as lowest value).
     /// </summary>
     /// <remarks>
-    /// Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/sort/
-    ///   "When comparing values of different BSON types, MongoDB uses the following
-    ///    comparison order: MinKey < Null < Numbers < Symbol < String < Object < Array
-    ///    < BinData < ObjectId < Boolean < Date < Timestamp < RegularExpression < MaxKey"
+    /// Ref: https://www.mongodb.com/docs/manual/reference/method/cursor.sort/#sort-asc-desc
+    ///   "For an ascending sort, comparison of a multi-value field such as an array
+    ///    to a single value field in another document, the sort picks the least value
+    ///    of the multi-value field for comparison."
+    ///   "For a descending sort, comparison treats the multi-value field as the greatest
+    ///    value in the field."
     /// </remarks>
-    private static BsonValue ResolveField(BsonDocument doc, string path)
+    private static BsonValue ResolveFieldForSort(BsonDocument doc, string path, int direction)
     {
-        return BsonFilterEvaluator.ResolveFieldPath(doc, path);
+        var value = BsonFilterEvaluator.ResolveFieldPath(doc, path);
+
+        if (value is BsonArray array && array.Count > 0)
+        {
+            return direction == 1
+                ? array.OrderBy(x => x, BsonValueComparer.Instance).First()
+                : array.OrderByDescending(x => x, BsonValueComparer.Instance).First();
+        }
+
+        return value;
     }
 }

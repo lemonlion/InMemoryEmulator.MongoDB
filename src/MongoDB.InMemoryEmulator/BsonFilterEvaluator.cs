@@ -65,14 +65,74 @@ internal static class BsonFilterEvaluator
         var fieldValue = ResolveFieldPath(document, fieldPath);
         var fieldExists = FieldExists(document, fieldPath);
 
+        // Ref: https://www.mongodb.com/docs/manual/tutorial/query-array-of-documents/
+        //   "Use dot notation to query a field in a document nested in an array."
+        //   When a dot-notation path traverses through an array of documents,
+        //   MongoDB checks each array element against the remaining path.
+        if (!fieldExists && fieldPath.Contains('.'))
+        {
+            if (TryMatchFieldThroughArray(document, fieldPath, condition))
+                return true;
+        }
+
         if (condition is BsonDocument condDoc && condDoc.ElementCount > 0 && condDoc.Names.First().StartsWith("$"))
         {
             // Operator conditions: { field: { $eq: value, $gt: value, ... } }
             return condDoc.All(op => MatchesOperator(fieldValue, fieldExists, op.Name, op.Value));
         }
 
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/regex/
+        //   "{ field: /pattern/ } is equivalent to { field: { $regex: /pattern/ } }"
+        //   Implicit regex matching uses regex semantics, not equality.
+        if (condition is BsonRegularExpression)
+        {
+            return fieldExists && MatchesRegex(fieldValue, condition);
+        }
+
         // Implicit equality: { field: value }
         return MatchesEquality(fieldValue, fieldExists, condition);
+    }
+
+    /// <summary>
+    /// Handles dot-notation field paths that traverse through arrays of documents.
+    /// When a path segment reaches an array and the next part is not a numeric index,
+    /// each document element of the array is checked against the remaining path.
+    /// </summary>
+    private static bool TryMatchFieldThroughArray(BsonDocument document, string fieldPath, BsonValue condition)
+    {
+        var parts = fieldPath.Split('.');
+        BsonValue current = document;
+
+        for (int i = 0; i < parts.Length; i++)
+        {
+            if (current is BsonDocument nested)
+            {
+                if (!nested.Contains(parts[i]))
+                    return false;
+                current = nested[parts[i]];
+            }
+            else if (current is BsonArray array)
+            {
+                if (int.TryParse(parts[i], out var index))
+                {
+                    if (index >= array.Count) return false;
+                    current = array[index];
+                }
+                else
+                {
+                    // Non-numeric path through array: check each document element
+                    var remainingPath = string.Join(".", parts.Skip(i));
+                    return array.Any(elem =>
+                        elem is BsonDocument elemDoc && MatchesField(elemDoc, remainingPath, condition));
+                }
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        return false;
     }
 
     private static bool MatchesOperator(BsonValue fieldValue, bool fieldExists, string op, BsonValue operand)
@@ -81,10 +141,14 @@ internal static class BsonFilterEvaluator
         {
             "$eq" => MatchesEquality(fieldValue, fieldExists, operand),
             "$ne" => !MatchesEquality(fieldValue, fieldExists, operand),
-            "$gt" => fieldExists && fieldValue.CompareTo(operand) > 0,
-            "$gte" => fieldExists && fieldValue.CompareTo(operand) >= 0,
-            "$lt" => fieldExists && fieldValue.CompareTo(operand) < 0,
-            "$lte" => fieldExists && fieldValue.CompareTo(operand) <= 0,
+
+            // Ref: https://www.mongodb.com/docs/manual/tutorial/query-arrays/
+            //   "When the field holds an array, comparison operators match the document
+            //    if at least one array element meets the condition."
+            "$gt" => fieldExists && MatchesComparison(fieldValue, operand, (a, b) => a.CompareTo(b) > 0),
+            "$gte" => fieldExists && MatchesComparison(fieldValue, operand, (a, b) => a.CompareTo(b) >= 0),
+            "$lt" => fieldExists && MatchesComparison(fieldValue, operand, (a, b) => a.CompareTo(b) < 0),
+            "$lte" => fieldExists && MatchesComparison(fieldValue, operand, (a, b) => a.CompareTo(b) <= 0),
             "$in" => MatchesIn(fieldValue, fieldExists, operand.AsBsonArray),
             "$nin" => !MatchesIn(fieldValue, fieldExists, operand.AsBsonArray),
             "$exists" => operand.AsBoolean ? fieldExists : !fieldExists,
@@ -143,6 +207,12 @@ internal static class BsonFilterEvaluator
         if (target == BsonNull.Value || target.IsBsonNull)
             return !fieldExists || fieldValue == BsonNull.Value || fieldValue.IsBsonNull;
 
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/in/
+        //   "You can also specify regular expression objects in the array."
+        //   When the target is a regex, use regex matching instead of equality.
+        if (target is BsonRegularExpression)
+            return fieldExists && MatchesRegex(fieldValue, target);
+
         // Direct equality
         if (fieldValue.Equals(target)) return true;
 
@@ -153,6 +223,22 @@ internal static class BsonFilterEvaluator
         return false;
     }
 
+    /// <summary>
+    /// Compares a field value against an operand, with array element iteration.
+    /// </summary>
+    /// <remarks>
+    /// Ref: https://www.mongodb.com/docs/manual/tutorial/query-arrays/
+    ///   "When the field holds an array, comparison operators match the document
+    ///    if at least one array element meets the condition."
+    /// </remarks>
+    private static bool MatchesComparison(BsonValue fieldValue, BsonValue operand, Func<BsonValue, BsonValue, bool> compare)
+    {
+        if (fieldValue is BsonArray array)
+            return array.Any(el => compare(el, operand));
+
+        return compare(fieldValue, operand);
+    }
+
     private static bool MatchesIn(BsonValue fieldValue, bool fieldExists, BsonArray values)
     {
         return values.Any(v => MatchesEquality(fieldValue, fieldExists, v));
@@ -160,8 +246,27 @@ internal static class BsonFilterEvaluator
 
     private static bool MatchesType(BsonValue fieldValue, BsonValue typeSpec)
     {
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/type/
+        //   "If the field holds an array, $type returns documents in which at least
+        //    one array element matches the specified BSON type."
+        if (fieldValue is BsonArray array && !IsTypeCheckForArray(typeSpec))
+            return array.Any(el => MatchesTypeSingle(el, typeSpec));
+
+        return MatchesTypeSingle(fieldValue, typeSpec);
+    }
+
+    private static bool IsTypeCheckForArray(BsonValue typeSpec)
+    {
+        if (typeSpec is BsonString ts) return ts.Value == "array";
+        if (typeSpec is BsonInt32 ti) return ti.Value == (int)BsonType.Array;
+        return false;
+    }
+
+    private static bool MatchesTypeSingle(BsonValue fieldValue, BsonValue typeSpec)
+    {
         if (typeSpec is BsonString typeStr)
         {
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/type/#available-types
             return typeStr.Value switch
             {
                 "double" => fieldValue.BsonType == BsonType.Double,
@@ -178,19 +283,46 @@ internal static class BsonFilterEvaluator
                 "long" => fieldValue.BsonType == BsonType.Int64,
                 "decimal" => fieldValue.BsonType == BsonType.Decimal128,
                 "number" => fieldValue.IsNumeric,
+                "timestamp" => fieldValue.BsonType == BsonType.Timestamp,
+                "javascript" => fieldValue.BsonType == BsonType.JavaScript,
+                "javascriptWithScope" => fieldValue.BsonType == BsonType.JavaScriptWithScope,
+                "minKey" => fieldValue.BsonType == BsonType.MinKey,
+                "maxKey" => fieldValue.BsonType == BsonType.MaxKey,
+                "undefined" => fieldValue.BsonType == BsonType.Undefined,
                 _ => false
             };
         }
 
         if (typeSpec is BsonInt32 typeInt)
         {
-            return (int)fieldValue.BsonType == typeInt.Value;
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/type/
+            //   "Numeric BSON type codes can also be used."
+            var checkType = typeInt.Value;
+            if (checkType == -1) return fieldValue.BsonType == BsonType.MinKey;
+            if (checkType == 127) return fieldValue.BsonType == BsonType.MaxKey;
+            return (int)fieldValue.BsonType == checkType;
         }
+
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/type/
+        //   "$type can also accept an array of types to check."
+        if (typeSpec is BsonArray typeArr)
+            return typeArr.Any(t => MatchesTypeSingle(fieldValue, t));
 
         return false;
     }
 
     private static bool MatchesRegex(BsonValue fieldValue, BsonValue regex)
+    {
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/regex/
+        //   "If the field contains an array, $regex selects only the documents
+        //    where at least one element matches the expression."
+        if (fieldValue is BsonArray array)
+            return array.Any(el => MatchesRegexSingle(el, regex));
+
+        return MatchesRegexSingle(fieldValue, regex);
+    }
+
+    private static bool MatchesRegexSingle(BsonValue fieldValue, BsonValue regex)
     {
         if (fieldValue.BsonType != BsonType.String) return false;
 
@@ -272,6 +404,17 @@ internal static class BsonFilterEvaluator
     }
 
     private static bool MatchesMod(BsonValue fieldValue, BsonArray operand)
+    {
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/mod/
+        //   "If the field contains an array, $mod selects the documents whose
+        //    arrays contain at least one element that meets the condition."
+        if (fieldValue is BsonArray array)
+            return array.Any(el => MatchesModSingle(el, operand));
+
+        return MatchesModSingle(fieldValue, operand);
+    }
+
+    private static bool MatchesModSingle(BsonValue fieldValue, BsonArray operand)
     {
         if (!fieldValue.IsNumeric) return false;
         var divisor = operand[0].ToDouble();

@@ -393,6 +393,9 @@ internal static class AggregationExpressionEvaluator
         var str = arr[0].AsString;
         var start = arr[1].ToInt32();
         var length = arr[2].ToInt32();
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/substr/
+        //   "If <start> is a negative number, $substr returns an empty string."
+        if (start < 0) return new BsonString("");
         if (start >= str.Length) return new BsonString("");
         return new BsonString(str.Substring(start, Math.Min(length, str.Length - start)));
     }

@@ -270,10 +270,22 @@ public class InMemoryMongoDatabase : IMongoDatabase
     public void RenameCollection(string oldName, string newName, RenameCollectionOptions? options = null, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+
+        // Ref: https://www.mongodb.com/docs/manual/reference/command/renameCollection/
+        //   "Returns an error if target namespace already exists."
+        // Check target first to avoid removing the source and then failing to add.
+        if (_stores.ContainsKey(newName))
+            throw MongoErrors.NamespaceExists($"{DatabaseNamespace.DatabaseName}.{newName}");
+
         if (_stores.TryRemove(oldName, out var store))
         {
             if (!_stores.TryAdd(newName, store))
+            {
+                // Race condition: another thread added the name between our check and add.
+                // Restore the original to avoid data loss.
+                _stores.TryAdd(oldName, store);
                 throw MongoErrors.NamespaceExists($"{DatabaseNamespace.DatabaseName}.{newName}");
+            }
 
             _explicitlyCreated.TryRemove(oldName, out _);
             _explicitlyCreated.TryAdd(newName, true);
