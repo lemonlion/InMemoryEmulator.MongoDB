@@ -854,6 +854,10 @@ internal static class AggregationExpressionEvaluator
         var spec = args.AsBsonDocument;
         var input = Evaluate(doc, spec["input"], variables);
         if (input == BsonNull.Value) return BsonNull.Value;
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/reduce/
+        //   "$reduce's input must be an array"
+        if (!input.IsBsonArray)
+            throw MongoErrors.BadValue($"$reduce's input must be an array, not {input.BsonType}");
         var initialValue = Evaluate(doc, spec["initialValue"], variables);
         var inExpr = spec["in"];
 
@@ -870,6 +874,10 @@ internal static class AggregationExpressionEvaluator
     {
         var val = Evaluate(doc, args is BsonArray a ? a[0] : args, variables);
         if (val == BsonNull.Value) return BsonNull.Value;
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/reverseArray/
+        //   "$reverseArray's argument must resolve to an array"
+        if (!val.IsBsonArray)
+            throw MongoErrors.BadValue($"$reverseArray's argument must resolve to an array, not {val.BsonType}");
         return new BsonArray(val.AsBsonArray.Reverse());
     }
 
@@ -888,6 +896,11 @@ internal static class AggregationExpressionEvaluator
     private static BsonValue EvalSlice(BsonDocument doc, BsonValue args, BsonDocument? variables)
     {
         var arr = EvalArray(doc, args, variables);
+        if (arr[0] == BsonNull.Value) return BsonNull.Value;
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/slice/
+        //   "The first argument must be an array"
+        if (!arr[0].IsBsonArray)
+            throw MongoErrors.BadValue($"$slice's first argument must be an array, not {arr[0].BsonType}");
         var array = arr[0].AsBsonArray;
         if (arr.Count == 2)
         {

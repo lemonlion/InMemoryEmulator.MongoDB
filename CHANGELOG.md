@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.25] - 2026-05-11
+
+### Fixed
+- `CreateIndex` with same name but different key specification now throws `MongoCommandException` — previously silently returned without creating the new index
+- `$reduce` on non-array input now throws proper `MongoCommandException` — previously threw `InvalidCastException`
+- `$reverseArray` on non-array input now throws proper `MongoCommandException` — previously threw `InvalidCastException`
+- `$slice` (aggregation) on non-array first argument now throws proper `MongoCommandException` — previously threw `InvalidCastException`
+
+### Added
+- 4 new integration tests covering CreateIndex name conflict validation, and `$reduce`/`$reverseArray`/`$slice` non-array input validation
+
 ## [0.11.24] - 2026-05-11
 
 ### Fixed

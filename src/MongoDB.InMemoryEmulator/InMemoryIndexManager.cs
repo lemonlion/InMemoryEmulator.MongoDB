@@ -48,13 +48,21 @@ public class InMemoryIndexManager<TDocument> : IMongoIndexManager<TDocument>
 
         lock (_lock)
         {
-            // Don't duplicate
-            if (_indexes.Any(idx => idx["name"].AsString == indexName))
-                return indexName;
-
             var rendered = model.Keys.Render(new RenderArgs<TDocument>(
                 BsonSerializer.LookupSerializer<TDocument>(),
                 BsonSerializer.SerializerRegistry));
+
+            // Ref: https://www.mongodb.com/docs/manual/reference/method/db.collection.createIndex/
+            //   "If you create an index with one set of options and then try to create the same index
+            //    but with different options, MongoDB will return an error."
+            var existing = _indexes.FirstOrDefault(idx => idx["name"].AsString == indexName);
+            if (existing != null)
+            {
+                if (!existing["key"].AsBsonDocument.Equals(rendered))
+                    throw MongoErrors.BadValue(
+                        $"Index with name '{indexName}' already exists with a different key specification");
+                return indexName;
+            }
 
             var indexDoc = new BsonDocument
             {
