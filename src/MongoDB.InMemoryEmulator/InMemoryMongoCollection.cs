@@ -1490,21 +1490,55 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         var rendered = RenderFilter(filter);
         if (rendered != null)
         {
-            foreach (var element in rendered)
-            {
-                if (!element.Name.StartsWith("$") && !element.Value.IsBsonDocument && !element.Value.IsBsonArray)
-                    doc[element.Name] = element.Value;
-                else if (!element.Name.StartsWith("$") && element.Value.IsBsonDocument)
-                {
-                    var inner = element.Value.AsBsonDocument;
-                    if (inner.ElementCount == 1 && inner.GetElement(0).Name == "$eq")
-                        doc[element.Name] = inner["$eq"];
-                }
-            }
+            ExtractEqualityConditions(rendered, doc);
         }
 
         DocumentStore.EnsureId(doc);
         return doc;
+    }
+
+    /// <summary>
+    /// Recursively extracts equality conditions from a rendered filter into the target document.
+    /// Handles $and, direct equality, $eq operator, and document/array equality values.
+    /// </summary>
+    /// <remarks>
+    /// Ref: https://www.mongodb.com/docs/manual/reference/method/db.collection.updateOne/
+    ///   "If a filter matches no documents and upsert: true, the new document is created
+    ///    from the equality conditions in the filter."
+    /// </remarks>
+    private static void ExtractEqualityConditions(BsonDocument filter, BsonDocument target)
+    {
+        foreach (var element in filter)
+        {
+            if (element.Name == "$and" && element.Value is BsonArray andArray)
+            {
+                // Recurse into $and conditions
+                foreach (var sub in andArray)
+                {
+                    if (sub is BsonDocument subDoc)
+                        ExtractEqualityConditions(subDoc, target);
+                }
+            }
+            else if (!element.Name.StartsWith("$"))
+            {
+                if (element.Value.IsBsonDocument)
+                {
+                    var inner = element.Value.AsBsonDocument;
+                    // Check if it's { $eq: value }
+                    if (inner.ElementCount == 1 && inner.GetElement(0).Name == "$eq")
+                        target[element.Name] = inner["$eq"];
+                    // Document equality: { field: { a: 1, b: 2 } } where no keys start with $
+                    else if (inner.ElementCount > 0 && !inner.Names.Any(n => n.StartsWith("$")))
+                        target[element.Name] = element.Value;
+                    // Skip filter operator docs like { $gt: 5 } — not equality
+                }
+                else
+                {
+                    // Direct equality: { field: value } — includes scalars, arrays, and null
+                    target[element.Name] = element.Value;
+                }
+            }
+        }
     }
 
     /// <summary>

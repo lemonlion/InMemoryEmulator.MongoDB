@@ -170,7 +170,10 @@ internal static class BsonFilterEvaluator
             "$nin" => !MatchesIn(fieldValue, fieldExists, operand.AsBsonArray),
             "$exists" => operand.AsBoolean ? fieldExists : !fieldExists,
             "$type" => fieldExists && MatchesType(fieldValue, operand),
-            "$not" => !MatchesField(new BsonDocument("_val", fieldValue), "_val", operand),
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/not/
+            //   "$not performs a logical NOT operation on the specified <operator-expression>."
+            //   If the field doesn't exist, comparison operators return false, so $not returns true.
+            "$not" => !MatchesNotInner(fieldValue, fieldExists, operand),
             "$regex" => fieldExists && MatchesRegex(fieldValue, operand),
 
             // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/all/
@@ -242,6 +245,28 @@ internal static class BsonFilterEvaluator
 
     /// <summary>
     /// Compares a field value against an operand, with array element iteration.
+    /// </summary>
+    /// <remarks>
+    /// <summary>
+    /// Evaluates the inner operand of a $not expression using the original fieldValue and fieldExists,
+    /// preserving correct behavior for missing fields.
+    /// </summary>
+    private static bool MatchesNotInner(BsonValue fieldValue, bool fieldExists, BsonValue operand)
+    {
+        if (operand is BsonRegularExpression regex)
+            return fieldExists && MatchesRegex(fieldValue, regex);
+
+        if (operand is BsonDocument condDoc)
+        {
+            return condDoc.All(op =>
+                MatchesOperator(fieldValue, fieldExists, op.Name, op.Value));
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Compares a field value against an operand, handling array elements.
     /// </summary>
     /// <remarks>
     /// Ref: https://www.mongodb.com/docs/manual/tutorial/query-arrays/

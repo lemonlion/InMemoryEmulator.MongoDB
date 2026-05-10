@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.16] - 2026-05-11
+
+### Fixed
+- `$not` filter operator now correctly handles missing fields — previously wrapped field value in a synthetic document, corrupting the `fieldExists` state and causing incorrect matches
+- `CreateUpsertDocumentFromFilter` now correctly extracts document equality values from filters (e.g., `{ nested: { a: 1, b: 2 } }`) and recursively handles `$and` conditions
+- `$push` update operator now validates that `$sort`, `$slice`, and `$position` modifiers require the `$each` modifier — previously silently pushed them as literal document values
+
+### Added
+- 6 new integration tests covering `$not` with missing fields, upsert filter extraction (`$and`, document equality), `$graphLookup` deduplication, and `$push` modifier validation
+
 ## [0.11.15] - 2026-05-11
 
 ### Fixed

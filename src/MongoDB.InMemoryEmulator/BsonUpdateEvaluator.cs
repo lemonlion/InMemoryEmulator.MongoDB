@@ -293,6 +293,20 @@ internal static class BsonUpdateEvaluator
         {
             var fieldPath = element.Name;
 
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/sort/
+            //   "You must use the $sort modifier with the $each modifier."
+            // Same requirement applies to $slice and $position.
+            if (element.Value.IsBsonDocument)
+            {
+                var pushDoc = element.Value.AsBsonDocument;
+                if (!pushDoc.Contains("$each") &&
+                    (pushDoc.Contains("$sort") || pushDoc.Contains("$slice") || pushDoc.Contains("$position")))
+                {
+                    var modifier = pushDoc.Contains("$sort") ? "$sort" : pushDoc.Contains("$slice") ? "$slice" : "$position";
+                    throw MongoErrors.BadValue($"The {modifier} modifier can only be used with the $each modifier");
+                }
+            }
+
             if (HasPositionalOperator(fieldPath))
             {
                 ApplyPositionalAction(doc, fieldPath, ctx, (d, leaf) =>
