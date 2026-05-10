@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.15] - 2026-05-11
+
+### Fixed
+- `RemoveFieldPath` now handles numeric array indices in dot-notation paths (e.g., `$unset: { "items.0.qty": "" }`) — previously silently no-oped
+- `$unset` on array elements by numeric index now correctly sets elements to `null` (matching MongoDB behavior) instead of ignoring them
+- Added missing `FaultInjector` and `OperationLog` support to `FindOneAndReplace`, `FindOneAndUpdate`, `DeleteMany`, `UpdateMany`, and `ReplaceOne`
+
+### Added
+- 7 new integration tests covering RemoveFieldPath array indexing and OperationLog coverage for all write operations
+
 ## [0.11.14] - 2026-05-11
 
 ### Fixed

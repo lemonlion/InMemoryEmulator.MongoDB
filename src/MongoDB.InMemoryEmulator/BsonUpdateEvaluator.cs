@@ -729,6 +729,11 @@ internal static class BsonUpdateEvaluator
         }
     }
 
+    /// <remarks>
+    /// Ref: https://www.mongodb.com/docs/manual/reference/operator/update/unset/
+    ///   "If the field does not exist, then $unset does nothing."
+    ///   When unsetting an array element by index, MongoDB sets it to null.
+    /// </remarks>
     private static void RemoveFieldPath(BsonDocument doc, string path)
     {
         if (!path.Contains('.'))
@@ -738,16 +743,40 @@ internal static class BsonUpdateEvaluator
         }
 
         var parts = path.Split('.');
-        var current = doc;
+        BsonValue current = doc;
 
         for (int i = 0; i < parts.Length - 1; i++)
         {
-            if (!current.Contains(parts[i]) || !current[parts[i]].IsBsonDocument)
+            if (current is BsonArray arr && int.TryParse(parts[i], out var idx))
+            {
+                if (idx >= 0 && idx < arr.Count)
+                    current = arr[idx];
+                else
+                    return;
+            }
+            else if (current is BsonDocument curDoc)
+            {
+                if (!curDoc.Contains(parts[i])) return;
+                current = curDoc[parts[i]];
+                if (!current.IsBsonDocument && !current.IsBsonArray) return;
+            }
+            else
+            {
                 return;
-            current = current[parts[i]].AsBsonDocument;
+            }
         }
 
-        current.Remove(parts[^1]);
+        var leaf = parts[^1];
+        if (current is BsonArray leafArr && int.TryParse(leaf, out var leafIdx))
+        {
+            // MongoDB sets array elements to null when unsetting by index
+            if (leafIdx >= 0 && leafIdx < leafArr.Count)
+                leafArr[leafIdx] = BsonNull.Value;
+        }
+        else if (current is BsonDocument leafDoc)
+        {
+            leafDoc.Remove(leaf);
+        }
     }
 
     private static BsonValue AddBsonValues(BsonValue a, BsonValue b)

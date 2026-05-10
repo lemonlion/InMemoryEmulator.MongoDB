@@ -412,6 +412,9 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
     public DeleteResult DeleteMany(FilterDefinition<TDocument> filter, DeleteOptions? options, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var renderedFilter = RenderFilter(filter);
+        FaultInjector?.Invoke("delete", renderedFilter);
+        OperationLog.Record(new OperationRecord { Type = "DeleteMany", Filter = renderedFilter?.DeepClone().AsBsonDocument });
         var matches = FindInternalBson(filter);
         foreach (var doc in matches)
         {
@@ -443,6 +446,9 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
     public ReplaceOneResult ReplaceOne(FilterDefinition<TDocument> filter, TDocument replacement, ReplaceOptions? options = null, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var renderedFilter = RenderFilter(filter);
+        FaultInjector?.Invoke("update", renderedFilter);
+        OperationLog.Record(new OperationRecord { Type = "ReplaceOne", Filter = renderedFilter?.DeepClone().AsBsonDocument });
         var replacementBson = SerializeDocument(replacement);
 
         // Validate replacement doc doesn't contain update operators
@@ -599,6 +605,8 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         cancellationToken.ThrowIfCancellationRequested();
         var updateBson = RenderUpdate(update);
         var renderedFilter = RenderFilter(filter);
+        FaultInjector?.Invoke("update", renderedFilter);
+        OperationLog.Record(new OperationRecord { Type = "UpdateMany", Filter = renderedFilter?.DeepClone().AsBsonDocument, Update = updateBson is BsonDocument ud ? ud.DeepClone().AsBsonDocument : null });
         ValidateUpdate(updateBson);
 
         var renderedArrayFilters = RenderArrayFilters(options?.ArrayFilters);
@@ -737,6 +745,9 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
     public TProjection FindOneAndReplace<TProjection>(FilterDefinition<TDocument> filter, TDocument replacement, FindOneAndReplaceOptions<TDocument, TProjection>? options = null, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var renderedFilter = RenderFilter(filter);
+        FaultInjector?.Invoke("findAndModify", renderedFilter);
+        OperationLog.Record(new OperationRecord { Type = "FindOneAndReplace", Filter = renderedFilter?.DeepClone().AsBsonDocument });
         var replacementBson = SerializeDocument(replacement);
         if (replacementBson.Names.Any(n => n.StartsWith("$")))
             throw MongoErrors.BadValue("the replace operation document must not contain atomic operators");
@@ -818,6 +829,8 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         cancellationToken.ThrowIfCancellationRequested();
         var updateBson = RenderUpdate(update);
         var renderedFilter = RenderFilter(filter);
+        FaultInjector?.Invoke("findAndModify", renderedFilter);
+        OperationLog.Record(new OperationRecord { Type = "FindOneAndUpdate", Filter = renderedFilter?.DeepClone().AsBsonDocument, Update = updateBson is BsonDocument ud ? ud.DeepClone().AsBsonDocument : null });
         ValidateUpdate(updateBson);
 
         var renderedArrayFilters = RenderArrayFilters(options?.ArrayFilters);
