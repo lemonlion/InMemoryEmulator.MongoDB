@@ -628,10 +628,13 @@ internal static class AggregationExpressionEvaluator
     #region Conditional
 
     // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/cond/
+    //   "$cond requires exactly 3 arguments in array form: [if, then, else]."
     private static BsonValue EvalCond(BsonDocument doc, BsonValue args, BsonDocument? variables)
     {
         if (args is BsonArray arr3)
         {
+            if (arr3.Count != 3)
+                throw MongoErrors.BadValue("$cond requires exactly 3 arguments in array form: [if, then, else]");
             var condition = Evaluate(doc, arr3[0], variables);
             return IsTruthy(condition) ? Evaluate(doc, arr3[1], variables) : Evaluate(doc, arr3[2], variables);
         }
