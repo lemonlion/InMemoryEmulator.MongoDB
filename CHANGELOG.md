@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.9] - 2026-05-11
+
+### Fixed
+- `$unwind` now treats scalar values (string, number, subdocument) as single-element arrays instead of dropping the document
+- `$unwind` `preserveNullAndEmptyArrays` now correctly handles dot-notation paths for nested field removal
+- `$group` `$sum` now preserves integer types (returns Int32/Int64 when all inputs are integers, Double only when inputs contain doubles)
+- Aggregation `$project` inclusion with dot-notation paths now creates proper nested document structure instead of flat fields
+- Aggregation `$project` exclusion with dot-notation paths now correctly removes nested fields
+
+### Added
+- 10 new integration tests covering $unwind scalar values, $unwind nested paths, $sum type preservation, $project dot-notation inclusion/exclusion
+
 ## [0.11.7] - 2026-05-10
 
 ### Fixed

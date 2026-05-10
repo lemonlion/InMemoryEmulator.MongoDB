@@ -161,7 +161,7 @@ internal static class AggregationPipelineExecutor
                         // Ref: https://www.mongodb.com/docs/manual/reference/aggregation-variables/
                         //   "$$REMOVE ... Allows for the exclusion of fields in ... $project stages."
                         if (!AggregationExpressionEvaluator.IsRemove(exprResult))
-                            result[el.Name] = exprResult;
+                            SetFieldPath(result, el.Name, exprResult);
                     }
                     else
                     {
@@ -169,7 +169,7 @@ internal static class AggregationPipelineExecutor
                         if (el.Value.ToBoolean())
                         {
                             var val = BsonFilterEvaluator.ResolveFieldPath(doc, el.Name);
-                            if (val != BsonNull.Value) result[el.Name] = val;
+                            if (val != BsonNull.Value) SetFieldPath(result, el.Name, val);
                         }
                     }
                 }
@@ -178,24 +178,28 @@ internal static class AggregationPipelineExecutor
                     // Field expression like "$fieldName"
                     var exprResult = AggregationExpressionEvaluator.Evaluate(doc, el.Value);
                     if (!AggregationExpressionEvaluator.IsRemove(exprResult))
-                        result[el.Name] = exprResult;
+                        SetFieldPath(result, el.Name, exprResult);
                 }
                 else if (el.Value.ToBoolean())
                 {
+                    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/project/
+                    //   "You can use dot notation to include fields in embedded documents."
                     var val = BsonFilterEvaluator.ResolveFieldPath(doc, el.Name);
-                    if (val != BsonNull.Value) result[el.Name] = val;
+                    if (val != BsonNull.Value) SetFieldPath(result, el.Name, val);
                 }
             }
         }
         else
         {
-            // Exclusion mode: copy all fields except excluded ones
-            var excluded = new HashSet<string>(spec.Names.Where(n => !spec[n].ToBoolean()));
+            // Exclusion mode: copy all fields then remove excluded paths
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/project/
+            //   "You can use dot notation to exclude fields in embedded documents."
             foreach (var el in doc)
-            {
-                if (!excluded.Contains(el.Name))
-                    result[el.Name] = el.Value;
-            }
+                result[el.Name] = el.Value.DeepClone();
+
+            var excluded = spec.Names.Where(n => !spec[n].ToBoolean()).ToList();
+            foreach (var path in excluded)
+                RemoveFieldPath(result, path);
         }
 
         return result;
@@ -328,16 +332,31 @@ internal static class AggregationPipelineExecutor
     private static BsonValue ComputeSum(List<BsonDocument> docs, BsonValue fieldExpr)
     {
         // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/sum/
+        //   "Returns an integer when all values are integers."
+        //   "Returns a long when any value is a long."
+        //   "Returns a double when any value is a double."
         if (fieldExpr is BsonInt32 literal)
             return new BsonInt64((long)literal.Value * docs.Count);
 
+        bool hasDouble = false;
+        bool hasLong = false;
         double sum = 0;
         foreach (var doc in docs)
         {
             var val = AggregationExpressionEvaluator.Evaluate(doc, fieldExpr);
-            if (val.IsNumeric) sum += val.ToDouble();
+            if (val.IsNumeric)
+            {
+                sum += val.ToDouble();
+                if (val.BsonType == BsonType.Double || val.BsonType == BsonType.Decimal128)
+                    hasDouble = true;
+                else if (val.BsonType == BsonType.Int64)
+                    hasLong = true;
+            }
         }
-        return new BsonDouble(sum);
+
+        if (hasDouble) return new BsonDouble(sum);
+        if (hasLong) return new BsonInt64((long)sum);
+        return new BsonInt32((int)sum);
     }
 
     private static BsonValue ComputeAvg(List<BsonDocument> docs, BsonValue fieldExpr)
@@ -549,11 +568,22 @@ internal static class AggregationPipelineExecutor
                     yield return clone;
                 }
             }
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/unwind/
+            //   "If the operand does not resolve to an array but is not missing, null, or an empty array,
+            //    $unwind treats the operand as a single element array."
+            else if (value != BsonNull.Value && value != null && !(value is BsonArray { Count: 0 }))
+            {
+                // Scalar value — treat as single-element array
+                var clone = doc.DeepClone().AsBsonDocument;
+                if (includeArrayIndex != null)
+                    clone[includeArrayIndex] = new BsonInt64(0);
+                yield return clone;
+            }
             else if (preserveNullAndEmpty)
             {
                 var clone = doc.DeepClone().AsBsonDocument;
                 if (value is BsonArray { Count: 0 })
-                    clone.Remove(path);
+                    RemoveFieldPath(clone, path);
                 if (includeArrayIndex != null)
                     clone[includeArrayIndex] = BsonNull.Value;
                 yield return clone;
