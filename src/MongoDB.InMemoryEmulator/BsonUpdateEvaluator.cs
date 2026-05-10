@@ -736,9 +736,16 @@ internal static class BsonUpdateEvaluator
             }
             else if (current is BsonDocument curDoc)
             {
-                if (!curDoc.Contains(parts[i]) || (!curDoc[parts[i]].IsBsonDocument && !curDoc[parts[i]].IsBsonArray))
+                if (!curDoc.Contains(parts[i]))
                 {
                     curDoc[parts[i]] = new BsonDocument();
+                }
+                else if (!curDoc[parts[i]].IsBsonDocument && !curDoc[parts[i]].IsBsonArray)
+                {
+                    // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/set/
+                    //   MongoDB throws PathNotViable (code 28) when a dotted path traverses a scalar.
+                    throw MongoErrors.BadValue(
+                        $"Cannot create field '{parts[i + 1]}' in element {{{parts[i]}: {curDoc[parts[i]]}}}");
                 }
                 current = curDoc[parts[i]];
             }

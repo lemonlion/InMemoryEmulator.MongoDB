@@ -811,6 +811,10 @@ internal static class AggregationExpressionEvaluator
         var asVar = spec.GetValue("as", "this").AsString;
         var cond = spec["cond"];
         var limit = spec.Contains("limit") ? Evaluate(doc, spec["limit"], variables).ToInt32() : int.MaxValue;
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/filter/
+        //   "$filter's input must be an array"
+        if (!input.IsBsonArray)
+            throw MongoErrors.BadValue($"$filter's input must be an array, not {input.BsonType}");
 
         var result = new BsonArray();
         foreach (var item in input.AsBsonArray)
@@ -829,6 +833,10 @@ internal static class AggregationExpressionEvaluator
         var spec = args.AsBsonDocument;
         var input = Evaluate(doc, spec["input"], variables);
         if (input == BsonNull.Value) return BsonNull.Value;
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/map/
+        //   "$map's input must be an array"
+        if (!input.IsBsonArray)
+            throw MongoErrors.BadValue($"$map's input must be an array, not {input.BsonType}");
         var asVar = spec.GetValue("as", "this").AsString;
         var inExpr = spec["in"];
 
@@ -929,6 +937,10 @@ internal static class AggregationExpressionEvaluator
     {
         var val = Evaluate(doc, args is BsonArray a ? a[0] : args, variables);
         if (val == BsonNull.Value) return BsonNull.Value;
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/objectToArray/
+        //   "$objectToArray requires a document input"
+        if (!val.IsBsonDocument)
+            throw MongoErrors.BadValue($"$objectToArray requires a document input, found: {val.BsonType}");
         var result = new BsonArray();
         foreach (var el in val.AsBsonDocument)
             result.Add(new BsonDocument { { "k", el.Name }, { "v", el.Value } });
