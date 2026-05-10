@@ -455,6 +455,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                 DocumentStore.EnsureId(replacementBson);
                 _indexManager.ValidateDocument(replacementBson);
                 var doc = _store.Insert(replacementBson);
+                PublishChangeEvent(ChangeStreamOperationType.Insert, doc);
                 var upsertedId = doc["_id"];
                 return new ReplaceOneResult.Acknowledged(0, 0, upsertedId);
             }
@@ -533,6 +534,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                 DocumentStore.EnsureId(upsertResult);
                 _indexManager.ValidateDocument(upsertResult);
                 var inserted = _store.Insert(upsertResult);
+                PublishChangeEvent(ChangeStreamOperationType.Insert, inserted);
                 return new UpdateResult.Acknowledged(0, 0, inserted["_id"]);
             }
             return new UpdateResult.Acknowledged(0, 0, null);
@@ -590,6 +592,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                 DocumentStore.EnsureId(upsertResult);
                 _indexManager.ValidateDocument(upsertResult);
                 var inserted = _store.Insert(upsertResult);
+                PublishChangeEvent(ChangeStreamOperationType.Insert, inserted);
                 return new UpdateResult.Acknowledged(0, 0, inserted["_id"]);
             }
             return new UpdateResult.Acknowledged(0, 0, null);
@@ -717,6 +720,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                 DocumentStore.EnsureId(replacementBson);
                 _indexManager.ValidateDocument(replacementBson);
                 var doc = _store.Insert(replacementBson);
+                PublishChangeEvent(ChangeStreamOperationType.Insert, doc);
                 if (options.ReturnDocument == ReturnDocument.After)
                 {
                     var afterResult = ApplyProjectionIfNeeded(doc, options.Projection);
@@ -798,6 +802,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                 DocumentStore.EnsureId(upsertResult);
                 _indexManager.ValidateDocument(upsertResult);
                 var inserted = _store.Insert(upsertResult);
+                PublishChangeEvent(ChangeStreamOperationType.Insert, inserted);
                 if (options.ReturnDocument == ReturnDocument.After)
                 {
                     var afterResult = ApplyProjectionIfNeeded(inserted, options.Projection);
@@ -1026,7 +1031,10 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                 {
                     case InsertOneModel<TDocument> insert:
                         var bson = SerializeDocument(insert.Document);
-                        _store.Insert(bson);
+                        DocumentStore.EnsureId(bson);
+                        _indexManager.ValidateDocument(bson);
+                        var insertedDoc = _store.Insert(bson);
+                        PublishChangeEvent(ChangeStreamOperationType.Insert, insertedDoc);
                         WriteBackId(insert.Document, bson);
                         insertedCount++;
                         break;

@@ -77,8 +77,25 @@ internal static class BsonFilterEvaluator
 
         if (condition is BsonDocument condDoc && condDoc.ElementCount > 0 && condDoc.Names.First().StartsWith("$"))
         {
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/regex/
+            //   "$options: Optional. Modifies the $regex behavior. Consumed alongside $regex."
+            // Pre-merge $options into $regex so MatchesOperator doesn't see $options as unknown.
+            BsonValue? mergedRegex = null;
+            if (condDoc.Contains("$regex") && condDoc.Contains("$options"))
+            {
+                var pattern = condDoc["$regex"].AsString;
+                var opts = condDoc["$options"].AsString;
+                mergedRegex = new BsonRegularExpression(pattern, opts);
+            }
+
             // Operator conditions: { field: { $eq: value, $gt: value, ... } }
-            return condDoc.All(op => MatchesOperator(fieldValue, fieldExists, op.Name, op.Value));
+            return condDoc.All(op =>
+            {
+                if (op.Name == "$options") return true; // consumed by $regex
+                if (op.Name == "$regex" && mergedRegex != null)
+                    return MatchesOperator(fieldValue, fieldExists, "$regex", mergedRegex);
+                return MatchesOperator(fieldValue, fieldExists, op.Name, op.Value);
+            });
         }
 
         // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/regex/

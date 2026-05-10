@@ -237,7 +237,12 @@ public class InMemoryMongoDatabase : IMongoDatabase
     public IAsyncCursor<string> ListCollectionNames(ListCollectionNamesOptions? options = null, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var names = _stores.Keys.ToList();
+        // Ref: https://www.mongodb.com/docs/manual/reference/command/listCollections/
+        //   "Returns both collections and views."
+        var names = _stores.Keys
+            .Union(_views.Keys)
+            .Distinct()
+            .ToList();
 
         if (options?.Filter != null)
         {
@@ -488,10 +493,29 @@ public class InMemoryMongoDatabase : IMongoDatabase
             docs = docs.Where(d => BsonFilterEvaluator.Matches(d, filter)).ToList();
         }
 
-        var values = docs.Select(d => BsonFilterEvaluator.ResolveFieldPath(d, key))
-            .Where(v => v != BsonNull.Value)
-            .Distinct(BsonValueComparer.Instance)
-            .ToList();
+        // Ref: https://www.mongodb.com/docs/manual/reference/command/distinct/
+        //   "If the value of the specified field is an array, distinct considers each element
+        //    of the array as a separate value."
+        var seen = new HashSet<BsonValue>(BsonValueComparer.Instance);
+        var values = new List<BsonValue>();
+        foreach (var d in docs)
+        {
+            var val = BsonFilterEvaluator.ResolveFieldPath(d, key);
+            if (val == BsonNull.Value) continue;
+
+            if (val is BsonArray arr)
+            {
+                foreach (var element in arr)
+                {
+                    if (element == BsonNull.Value) continue;
+                    if (seen.Add(element)) values.Add(element);
+                }
+            }
+            else
+            {
+                if (seen.Add(val)) values.Add(val);
+            }
+        }
 
         return new BsonDocument { { "ok", 1 }, { "values", new BsonArray(values) } };
     }

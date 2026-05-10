@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.7] - 2026-05-10
+
+### Fixed
+- `$regex` + `$options` in operator form no longer throws `NotSupportedException` (options are now consumed alongside regex)
+- `$round` now uses IEEE 754 round-to-even (was incorrectly using round-half-away-from-zero)
+- Upsert inserts now publish change stream `Insert` events (UpdateOne, UpdateMany, ReplaceOne, FindOneAndReplace, FindOneAndUpdate)
+- `BulkWrite` `InsertOneModel` now validates unique indexes and publishes change stream events
+- `ListCollectionNames` now includes views (not just collections)
+- `RunCommand` `distinct` now unwraps array field values into individual elements
+
+### Added
+- 10 new integration tests covering regex options, round-to-even, upsert change events, BulkWrite validation, views in ListCollectionNames, RunCommand distinct arrays
+
 ## [0.11.6] - 2026-05-10
 
 ### Fixed

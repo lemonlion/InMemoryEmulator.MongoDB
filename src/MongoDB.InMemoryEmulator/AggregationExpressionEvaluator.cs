@@ -368,7 +368,9 @@ internal static class AggregationExpressionEvaluator
         var arr = EvalArray(doc, args, variables);
         var val = arr[0].ToDouble();
         int places = arr.Count > 1 ? arr[1].ToInt32() : 0;
-        return new BsonDouble(Math.Round(val, places, MidpointRounding.AwayFromZero));
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/round/
+        //   "Rounds using the IEEE 754 round-to-even rule."
+        return new BsonDouble(Math.Round(val, places, MidpointRounding.ToEven));
     }
 
     private static BsonValue EvalTrunc(BsonDocument doc, BsonValue args, BsonDocument? variables)
