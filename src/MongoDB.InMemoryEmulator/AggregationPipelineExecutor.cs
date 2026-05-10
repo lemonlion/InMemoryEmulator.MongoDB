@@ -383,7 +383,9 @@ internal static class AggregationPipelineExecutor
         }
 
         if (hasDouble) return new BsonDouble(sum);
-        if (hasLong) return new BsonInt64((long)sum);
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/sum/
+        //   "Returns a long when the result would overflow the int range."
+        if (hasLong || sum > int.MaxValue || sum < int.MinValue) return new BsonInt64((long)sum);
         return new BsonInt32((int)sum);
     }
 
@@ -801,7 +803,11 @@ internal static class AggregationPipelineExecutor
     {
         var groupBy = spec["groupBy"];
         var boundaries = spec["boundaries"].AsBsonArray;
-        var defaultBucket = spec.GetValue("default", BsonNull.Value);
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/bucket/
+        //   "default: A literal that specifies the _id of an additional bucket."
+        //   Must distinguish "no default specified" from "default: null".
+        var hasDefault = spec.Contains("default");
+        var defaultBucket = hasDefault ? spec["default"] : BsonNull.Value;
         var outputSpec = spec.Contains("output") ? spec["output"].AsBsonDocument : null;
 
         var docs = input.ToList();
@@ -825,7 +831,7 @@ internal static class AggregationPipelineExecutor
             }
             if (!placed)
             {
-                if (defaultBucket != BsonNull.Value) defaultDocs.Add(doc);
+                if (hasDefault) defaultDocs.Add(doc);
                 else throw MongoErrors.BadValue("$bucket: element doesn't fall into any bucket and no default specified");
             }
         }
@@ -863,16 +869,42 @@ internal static class AggregationPipelineExecutor
 
         var docs = input.ToList();
         var sorted = docs.OrderBy(d => AggregationExpressionEvaluator.Evaluate(d, groupBy), BsonValueComparer.Instance).ToList();
-        int perBucket = Math.Max(1, (int)Math.Ceiling((double)sorted.Count / buckets));
 
-        for (int i = 0; i < sorted.Count; i += perBucket)
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/bucketAuto/
+        //   Documents with the same groupBy value must not be split across buckets.
+        //   Build chunks that respect value boundaries.
+        var chunks = new List<List<BsonDocument>>();
+        int targetPerBucket = Math.Max(1, (int)Math.Ceiling((double)sorted.Count / buckets));
+        int idx = 0;
+        while (idx < sorted.Count && chunks.Count < buckets)
         {
-            var chunk = sorted.Skip(i).Take(perBucket).ToList();
+            var chunk = new List<BsonDocument>();
+            int taken = 0;
+            while (idx < sorted.Count)
+            {
+                chunk.Add(sorted[idx]);
+                idx++;
+                taken++;
+                // Once we've taken enough, stop — but only at a value boundary
+                // (don't stop if the next doc has the same groupBy value)
+                if (taken >= targetPerBucket && chunks.Count < buckets - 1 && idx < sorted.Count)
+                {
+                    var curVal = AggregationExpressionEvaluator.Evaluate(chunk[^1], groupBy);
+                    var nextVal = AggregationExpressionEvaluator.Evaluate(sorted[idx], groupBy);
+                    if (BsonValueComparer.Instance.Compare(curVal, nextVal) != 0)
+                        break; // value boundary — safe to start a new bucket
+                }
+            }
+            chunks.Add(chunk);
+        }
+
+        for (int i = 0; i < chunks.Count; i++)
+        {
+            var chunk = chunks[i];
             if (chunk.Count == 0) continue;
             var minVal = AggregationExpressionEvaluator.Evaluate(chunk[0], groupBy);
-            var maxIdx = Math.Min(i + perBucket, sorted.Count);
-            var maxVal = maxIdx < sorted.Count
-                ? AggregationExpressionEvaluator.Evaluate(sorted[maxIdx], groupBy)
+            var maxVal = i < chunks.Count - 1
+                ? AggregationExpressionEvaluator.Evaluate(chunks[i + 1][0], groupBy)
                 : AggregationExpressionEvaluator.Evaluate(chunk[^1], groupBy);
 
             var result = new BsonDocument
@@ -960,6 +992,10 @@ internal static class AggregationPipelineExecutor
             var startValue = AggregationExpressionEvaluator.Evaluate(doc, startWith);
             var visited = new HashSet<BsonValue>(BsonValueComparer.Instance);
             var results = new BsonArray();
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/graphLookup/
+            //   "As each document in result set is reached, $graphLookup adds the document
+            //    to the working set, if it is not already there."
+            var visitedDocIds = new HashSet<BsonValue>(BsonValueComparer.Instance);
             var frontier = new List<(BsonValue value, int depth)>();
 
             // Initialize frontier
@@ -984,6 +1020,10 @@ internal static class AggregationPipelineExecutor
                         if (!matches) continue;
                         if (restrictSearchWithMatch != null && !BsonFilterEvaluator.Matches(foreign, restrictSearchWithMatch))
                             continue;
+
+                        // Deduplicate: only add each foreign document once
+                        var foreignId = foreign.Contains("_id") ? foreign["_id"] : BsonNull.Value;
+                        if (!visitedDocIds.Add(foreignId)) continue;
 
                         var clone = foreign.DeepClone().AsBsonDocument;
                         if (depthField != null)
