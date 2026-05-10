@@ -263,12 +263,17 @@ internal static class BsonUpdateEvaluator
     private static void ApplyPushEach(BsonArray array, BsonDocument spec)
     {
         var items = spec["$each"].AsBsonArray;
-        var position = spec.Contains("$position") ? spec["$position"].ToInt32() : -1;
+        var position = spec.Contains("$position") ? spec["$position"].ToInt32() : int.MinValue;
 
-        if (position >= 0)
+        if (position != int.MinValue)
         {
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/position/
+            //   "A negative value ... calculates the position relative to the end of the array."
+            int insertAt = position >= 0
+                ? Math.Min(position, array.Count)
+                : Math.Max(0, array.Count + position);
             for (int i = 0; i < items.Count; i++)
-                array.Insert(Math.Min(position + i, array.Count), items[i]);
+                array.Insert(Math.Min(insertAt + i, array.Count), items[i]);
         }
         else
         {
@@ -352,7 +357,7 @@ internal static class BsonUpdateEvaluator
             var condDoc = condition.AsBsonDocument;
             if (condDoc.Names.Any(n => n.StartsWith("$")))
             {
-                // Condition is a query expression
+                // Condition is a query expression with operators
                 if (element.IsBsonDocument)
                     return BsonFilterEvaluator.Matches(element.AsBsonDocument, condDoc);
                 // Apply condition as scalar comparison
@@ -360,7 +365,12 @@ internal static class BsonUpdateEvaluator
                 var wrapFilter = new BsonDocument("_v", condition);
                 return BsonFilterEvaluator.Matches(wrapDoc, wrapFilter);
             }
-            // Match exact document
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/pull/
+            //   "To specify a <condition>, use the query filters."
+            //   A condition like { field: value } without $ operators matches subdocuments
+            //   where field equals value, not exact document equality.
+            if (element.IsBsonDocument)
+                return BsonFilterEvaluator.Matches(element.AsBsonDocument, condDoc);
             return element.Equals(condition);
         }
         return element.Equals(condition);

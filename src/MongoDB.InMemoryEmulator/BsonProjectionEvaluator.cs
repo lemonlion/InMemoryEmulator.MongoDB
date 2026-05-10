@@ -112,7 +112,12 @@ internal static class BsonProjectionEvaluator
 
     /// <summary>
     /// In exclusion mode, all fields are included except listed ones.
+    /// Supports dot-notation for nested field exclusion.
     /// </summary>
+    /// <remarks>
+    /// Ref: https://www.mongodb.com/docs/manual/tutorial/project-fields-from-query-results/
+    ///   "Use dot notation to suppress fields in embedded documents."
+    /// </remarks>
     private static BsonDocument ApplyExclusion(BsonDocument doc, BsonDocument projection)
     {
         var excludedFields = new HashSet<string>();
@@ -123,14 +128,48 @@ internal static class BsonProjectionEvaluator
                 excludedFields.Add(element.Name);
         }
 
+        // Separate top-level exclusions from dot-notation exclusions
+        var topLevel = new HashSet<string>();
+        var dotNotation = new List<string>();
+        foreach (var field in excludedFields)
+        {
+            if (field.Contains('.'))
+                dotNotation.Add(field);
+            else
+                topLevel.Add(field);
+        }
+
         var result = new BsonDocument();
         foreach (var element in doc)
         {
-            if (!IsExcludedByDotPath(element.Name, excludedFields))
-                result[element.Name] = element.Value;
+            if (topLevel.Contains(element.Name))
+                continue;
+            result[element.Name] = element.Value;
+        }
+
+        // Apply dot-notation exclusions to nested fields
+        foreach (var field in dotNotation)
+        {
+            RemoveNestedField(result, field);
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Removes a nested field specified by dot-notation path.
+    /// </summary>
+    private static void RemoveNestedField(BsonDocument doc, string dotPath)
+    {
+        var parts = dotPath.Split('.');
+        var current = doc;
+        for (int i = 0; i < parts.Length - 1; i++)
+        {
+            if (!current.Contains(parts[i]) || !current[parts[i]].IsBsonDocument)
+                return;
+            current = current[parts[i]].AsBsonDocument;
+        }
+        current.Remove(parts[^1]);
     }
 
     /// <summary>
@@ -165,11 +204,6 @@ internal static class BsonProjectionEvaluator
         var lastPart = parts[^1];
         if (current.Contains(lastPart))
             targetCurrent[lastPart] = current[lastPart];
-    }
-
-    private static bool IsExcludedByDotPath(string fieldName, HashSet<string> excludedFields)
-    {
-        return excludedFields.Contains(fieldName);
     }
 
     /// <summary>

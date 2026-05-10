@@ -264,22 +264,60 @@ internal static class AggregationExpressionEvaluator
     #region Arithmetic
 
     // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/add/
+    //   "If one of the arguments is a date, $add treats the other arguments as milliseconds
+    //    to add to the date."
     private static BsonValue EvalAdd(BsonDocument doc, BsonValue args, BsonDocument? variables)
     {
         var arr = EvalArray(doc, args, variables);
-        double sum = 0;
+
+        // Check if any argument is a date
+        BsonDateTime? dateArg = null;
+        double numericSum = 0;
         foreach (var v in arr)
         {
             if (v == BsonNull.Value) return BsonNull.Value;
-            sum += v.ToDouble();
+            if (v.BsonType == BsonType.DateTime)
+            {
+                if (dateArg != null)
+                    throw MongoErrors.BadValue("only one date allowed in an $add expression");
+                dateArg = v.AsBsonDateTime;
+            }
+            else
+            {
+                numericSum += v.ToDouble();
+            }
         }
-        return new BsonDouble(sum);
+
+        if (dateArg != null)
+            return new BsonDateTime(dateArg.ToUniversalTime().AddMilliseconds(numericSum));
+
+        return new BsonDouble(numericSum);
     }
 
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/subtract/
+    //   "If the two values are dates, return the difference in milliseconds."
+    //   "If the two values are a date and a number... subtracts the number, in milliseconds, from the date."
     private static BsonValue EvalSubtract(BsonDocument doc, BsonValue args, BsonDocument? variables)
     {
         var arr = EvalArray(doc, args, variables);
         if (arr[0] == BsonNull.Value || arr[1] == BsonNull.Value) return BsonNull.Value;
+
+        bool firstIsDate = arr[0].BsonType == BsonType.DateTime;
+        bool secondIsDate = arr[1].BsonType == BsonType.DateTime;
+
+        if (firstIsDate && secondIsDate)
+        {
+            // Date - Date = difference in milliseconds
+            var ms = (arr[0].AsBsonDateTime.ToUniversalTime() - arr[1].AsBsonDateTime.ToUniversalTime()).TotalMilliseconds;
+            return new BsonDouble(ms);
+        }
+
+        if (firstIsDate)
+        {
+            // Date - number = Date minus milliseconds
+            return new BsonDateTime(arr[0].AsBsonDateTime.ToUniversalTime().AddMilliseconds(-arr[1].ToDouble()));
+        }
+
         return new BsonDouble(arr[0].ToDouble() - arr[1].ToDouble());
     }
 
@@ -430,7 +468,9 @@ internal static class AggregationExpressionEvaluator
     private static BsonValue EvalStrcasecmp(BsonDocument doc, BsonValue args, BsonDocument? variables)
     {
         var arr = EvalArray(doc, args, variables);
-        return new BsonInt32(string.Compare(arr[0].AsString, arr[1].AsString, StringComparison.OrdinalIgnoreCase));
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/strcasecmp/
+        //   "Returns 1, 0, or -1."
+        return new BsonInt32(Math.Sign(string.Compare(arr[0].AsString, arr[1].AsString, StringComparison.OrdinalIgnoreCase)));
     }
 
     private static BsonValue EvalReplaceOne(BsonDocument doc, BsonValue args, BsonDocument? variables)

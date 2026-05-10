@@ -318,7 +318,17 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
     public long CountDocuments(FilterDefinition<TDocument> filter, CountOptions? options = null, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return FindInternal(filter, null).Count;
+        long count = FindInternal(filter, null).Count;
+
+        // Ref: https://www.mongodb.com/docs/manual/reference/command/count/
+        //   "skip: Optional. The number of matching documents to skip before returning results."
+        //   "limit: Optional. The maximum number of matching documents to return."
+        if (options?.Skip > 0)
+            count = Math.Max(0, count - options.Skip.Value);
+        if (options?.Limit > 0)
+            count = Math.Min(count, options.Limit.Value);
+
+        return count;
     }
 
     public long CountDocuments(IClientSessionHandle session, FilterDefinition<TDocument> filter, CountOptions? options = null, CancellationToken cancellationToken = default)
@@ -800,14 +810,29 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
 
         var target = matches[0];
         var targetId = target["_id"];
-        var beforeChange = target.DeepClone().AsBsonDocument;
-        var updated = ApplyUpdate(target, updateBson);
-        updated["_id"] = targetId;
-        _indexManager.ValidateDocument(updated, excludeId: targetId);
-        _store.Replace(targetId, updated);
-        PublishChangeEvent(ChangeStreamOperationType.Update, updated, beforeChange);
 
-        var resultDoc = options?.ReturnDocument == ReturnDocument.After ? updated : target;
+        // Pre-validate: compute the updated doc and check unique indexes before committing
+        var previewDoc = ApplyUpdate(target.DeepClone().AsBsonDocument, updateBson);
+        previewDoc["_id"] = targetId;
+        _indexManager.ValidateDocument(previewDoc, excludeId: targetId);
+
+        // Use DocumentStore.Update for atomic apply and correct Update change type
+        var (matched, modified, beforeChange) = _store.Update(targetId, currentDoc =>
+        {
+            var applied = ApplyUpdate(currentDoc, updateBson);
+            applied["_id"] = targetId;
+            return applied;
+        });
+
+        if (matched && modified && beforeChange != null)
+        {
+            var afterDoc = _store.Get(targetId);
+            if (afterDoc != null) PublishChangeEvent(ChangeStreamOperationType.Update, afterDoc, beforeChange);
+        }
+
+        var resultDoc = options?.ReturnDocument == ReturnDocument.After
+            ? (_store.Get(targetId) ?? target)
+            : target;
         var projected = ApplyProjectionIfNeeded(resultDoc, options?.Projection);
         return BsonSerializer.Deserialize<TProjection>(projected);
     }

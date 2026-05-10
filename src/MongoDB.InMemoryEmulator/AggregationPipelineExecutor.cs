@@ -214,6 +214,7 @@ internal static class AggregationPipelineExecutor
 
     // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/unset/
     //   "Removes/excludes fields from documents."
+    //   "You can use dot notation to unset nested fields."
     private static IEnumerable<BsonDocument> ExecuteUnset(IEnumerable<BsonDocument> input, BsonValue spec)
     {
         var fields = spec is BsonArray arr
@@ -224,9 +225,31 @@ internal static class AggregationPipelineExecutor
         {
             var clone = doc.DeepClone().AsBsonDocument;
             foreach (var field in fields)
-                clone.Remove(field);
+                RemoveFieldPath(clone, field);
             return clone;
         });
+    }
+
+    /// <summary>
+    /// Removes a field by path, supporting dot-notation for nested fields.
+    /// </summary>
+    private static void RemoveFieldPath(BsonDocument doc, string fieldPath)
+    {
+        if (!fieldPath.Contains('.'))
+        {
+            doc.Remove(fieldPath);
+            return;
+        }
+
+        var parts = fieldPath.Split('.');
+        var current = doc;
+        for (int i = 0; i < parts.Length - 1; i++)
+        {
+            if (!current.Contains(parts[i]) || !current[parts[i]].IsBsonDocument)
+                return;
+            current = current[parts[i]].AsBsonDocument;
+        }
+        current.Remove(parts[^1]);
     }
 
     #endregion

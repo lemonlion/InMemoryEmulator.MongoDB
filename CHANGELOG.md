@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.6] - 2026-05-10
+
+### Fixed
+- `CountDocuments` now honors `CountOptions.Skip` and `CountOptions.Limit`
+- `$push` with negative `$position` now correctly inserts relative to the end of the array
+- `$unset` aggregation stage now supports dot-notation paths for nested field removal
+- Exclusion projection now supports dot-notation paths for nested field exclusion
+- `$strcasecmp` now normalizes return value to exactly -1, 0, or 1
+- `$add` now supports date arithmetic (Date + milliseconds returns Date)
+- `$subtract` now supports date arithmetic (Date - Date returns milliseconds, Date - number returns Date)
+- `$pull` with non-operator document conditions now matches subdocument fields instead of requiring exact equality
+- `FindOneAndUpdate` now uses atomic `DocumentStore.Update` with correct `Update` change type (was using `Replace`)
+
+### Added
+- 14 new integration tests covering CountDocuments options, $push negative position, $unset/$projection dot-notation, $strcasecmp, date arithmetic, $pull subdocument matching
+
 ## [0.11.5] - 2026-05-10
 
 ### Fixed
