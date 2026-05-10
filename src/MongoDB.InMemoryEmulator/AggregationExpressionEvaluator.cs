@@ -444,6 +444,10 @@ internal static class AggregationExpressionEvaluator
         foreach (var v in arr)
         {
             if (v == BsonNull.Value) return BsonNull.Value;
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/concat/
+            //   "$concat only supports strings, not <type>"
+            if (!v.IsString)
+                throw MongoErrors.BadValue($"$concat only supports strings, not {v.BsonType}");
             sb.Append(v.AsString);
         }
         return new BsonString(sb.ToString());
@@ -468,6 +472,10 @@ internal static class AggregationExpressionEvaluator
             var spec = args.AsBsonDocument;
             var input = Evaluate(doc, spec["input"], variables);
             if (input == BsonNull.Value) return BsonNull.Value;
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/trim/
+            //   "$trim requires its input to be a string"
+            if (!input.IsString)
+                throw MongoErrors.BadValue($"$trim requires its input to be a string, found: {input.BsonType}");
             var str = input.AsString;
             if (spec.Contains("chars"))
             {
@@ -482,6 +490,8 @@ internal static class AggregationExpressionEvaluator
         }
         var val = Evaluate(doc, args, variables);
         if (val == BsonNull.Value) return BsonNull.Value;
+        if (!val.IsString)
+            throw MongoErrors.BadValue($"$trim requires its input to be a string, found: {val.BsonType}");
         return new BsonString(fn(val.AsString));
     }
 
@@ -736,6 +746,10 @@ internal static class AggregationExpressionEvaluator
     {
         var arr = EvalArray(doc, args, variables);
         if (arr[0] == BsonNull.Value) return BsonNull.Value;
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/arrayElemAt/
+        //   "$arrayElemAt's first argument must be an array"
+        if (!arr[0].IsBsonArray)
+            throw MongoErrors.BadValue($"$arrayElemAt's first argument must be an array, but is {arr[0].BsonType}");
         var array = arr[0].AsBsonArray;
         var idx = arr[1].ToInt32();
         if (idx < 0) idx += array.Count;
@@ -768,6 +782,10 @@ internal static class AggregationExpressionEvaluator
         foreach (var v in arr)
         {
             if (v == BsonNull.Value) return BsonNull.Value;
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/concatArrays/
+            //   "$concatArrays only supports arrays, not <type>"
+            if (!v.IsBsonArray)
+                throw MongoErrors.BadValue($"$concatArrays only supports arrays, not {v.BsonType}");
             result.AddRange(v.AsBsonArray);
         }
         return result;
@@ -777,6 +795,10 @@ internal static class AggregationExpressionEvaluator
     {
         var arr = EvalArray(doc, args, variables);
         var value = arr[0];
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/in/
+        //   "$in requires an array as a second argument"
+        if (!arr[1].IsBsonArray)
+            throw MongoErrors.BadValue($"$in requires an array as a second argument, found: {arr[1].BsonType}");
         var array = arr[1].AsBsonArray;
         return (BsonBoolean)array.Any(x => x.Equals(value));
     }
@@ -1238,7 +1260,11 @@ internal static class AggregationExpressionEvaluator
             return BsonFilterEvaluator.ResolveFieldPath(doc, args.AsString);
         var spec = args.AsBsonDocument;
         var field = Evaluate(doc, spec["field"], variables).AsString;
-        var input = spec.Contains("input") ? Evaluate(doc, spec["input"], variables).AsBsonDocument : doc;
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/getField/
+        //   "If the input argument resolves to null, $getField returns null."
+        var inputVal = spec.Contains("input") ? Evaluate(doc, spec["input"], variables) : (BsonValue)doc;
+        if (inputVal == BsonNull.Value) return BsonNull.Value;
+        var input = inputVal.AsBsonDocument;
         return input.Contains(field) ? input[field] : BsonNull.Value;
     }
 
@@ -1246,7 +1272,11 @@ internal static class AggregationExpressionEvaluator
     {
         var spec = args.AsBsonDocument;
         var field = Evaluate(doc, spec["field"], variables).AsString;
-        var input = Evaluate(doc, spec["input"], variables).AsBsonDocument.DeepClone().AsBsonDocument;
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/setField/
+        //   "If the input argument resolves to null or missing, $setField returns null."
+        var inputVal = Evaluate(doc, spec["input"], variables);
+        if (inputVal == BsonNull.Value) return BsonNull.Value;
+        var input = inputVal.AsBsonDocument.DeepClone().AsBsonDocument;
         var value = Evaluate(doc, spec["value"], variables);
         input[field] = value;
         return input;

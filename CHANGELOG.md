@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.22] - 2026-05-11
+
+### Fixed
+- `$getField` with null input now returns `null` — previously threw `InvalidCastException`
+- `$setField` with null input now returns `null` — previously threw `InvalidCastException`
+- `$concat` with non-string arguments now throws proper `MongoCommandException` — previously threw `InvalidCastException`
+- `$trim`/`$ltrim`/`$rtrim` with non-string input now throws proper `MongoCommandException` — previously threw `InvalidCastException`
+- `$arrayElemAt` with non-array first argument now throws proper `MongoCommandException` — previously threw `InvalidCastException`
+- `$in` (aggregation) with non-array second argument now throws proper `MongoCommandException` — previously threw `InvalidCastException`
+- `$concatArrays` with non-array arguments now throws proper `MongoCommandException` — previously threw `InvalidCastException`
+
+### Added
+- 7 new integration tests covering `$getField`/`$setField` null input, `$concat`/`$trim` non-string type validation, and `$arrayElemAt`/`$in`/`$concatArrays` non-array type validation
+
 ## [0.11.21] - 2026-05-11
 
 ### Fixed
