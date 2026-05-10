@@ -19,11 +19,15 @@ internal static class BsonUpdateEvaluator
     /// <param name="update">The rendered update document with $ operators.</param>
     /// <param name="arrayFilters">Optional array filters for positional filtered updates.</param>
     /// <param name="isUpsertInsert">True if this is the insert portion of an upsert.</param>
+    /// <param name="matchedArrayIndex">Index of the first matched array element for positional $ operator.</param>
+    /// <param name="matchedArrayField">Name of the array field that was matched for positional $ operator.</param>
     /// <returns>The updated document.</returns>
     internal static BsonDocument Apply(BsonDocument document, BsonDocument update,
-        IReadOnlyList<BsonDocument>? arrayFilters = null, bool isUpsertInsert = false)
+        IReadOnlyList<BsonDocument>? arrayFilters = null, bool isUpsertInsert = false,
+        int matchedArrayIndex = -1, string? matchedArrayField = null)
     {
         var result = document.DeepClone().AsBsonDocument;
+        var ctx = new PositionalContext(matchedArrayIndex, matchedArrayField, arrayFilters);
 
         foreach (var element in update)
         {
@@ -32,27 +36,27 @@ internal static class BsonUpdateEvaluator
                 // Ref: https://www.mongodb.com/docs/manual/reference/operator/update-field/
                 case "$set":
                     ValidateIdNotTargeted(element.Value.AsBsonDocument, "$set");
-                    ApplySet(result, element.Value.AsBsonDocument);
+                    ApplySet(result, element.Value.AsBsonDocument, ctx);
                     break;
                 case "$unset":
                     ValidateIdNotTargeted(element.Value.AsBsonDocument, "$unset");
-                    ApplyUnset(result, element.Value.AsBsonDocument);
+                    ApplyUnset(result, element.Value.AsBsonDocument, ctx);
                     break;
                 case "$inc":
                     ValidateIdNotTargeted(element.Value.AsBsonDocument, "$inc");
-                    ApplyInc(result, element.Value.AsBsonDocument);
+                    ApplyInc(result, element.Value.AsBsonDocument, ctx);
                     break;
                 case "$mul":
                     ValidateIdNotTargeted(element.Value.AsBsonDocument, "$mul");
-                    ApplyMul(result, element.Value.AsBsonDocument);
+                    ApplyMul(result, element.Value.AsBsonDocument, ctx);
                     break;
                 case "$min":
                     ValidateIdNotTargeted(element.Value.AsBsonDocument, "$min");
-                    ApplyMin(result, element.Value.AsBsonDocument);
+                    ApplyMin(result, element.Value.AsBsonDocument, ctx);
                     break;
                 case "$max":
                     ValidateIdNotTargeted(element.Value.AsBsonDocument, "$max");
-                    ApplyMax(result, element.Value.AsBsonDocument);
+                    ApplyMax(result, element.Value.AsBsonDocument, ctx);
                     break;
                 case "$rename":
                     ValidateRenameNotTargetingId(element.Value.AsBsonDocument);
@@ -60,13 +64,13 @@ internal static class BsonUpdateEvaluator
                     break;
                 case "$currentDate":
                     ValidateIdNotTargeted(element.Value.AsBsonDocument, "$currentDate");
-                    ApplyCurrentDate(result, element.Value.AsBsonDocument);
+                    ApplyCurrentDate(result, element.Value.AsBsonDocument, ctx);
                     break;
                 case "$setOnInsert":
                     // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/setOnInsert/
                     //   "Only applied when an upsert inserts a new document."
                     if (isUpsertInsert)
-                        ApplySet(result, element.Value.AsBsonDocument);
+                        ApplySet(result, element.Value.AsBsonDocument, ctx);
                     break;
 
                 // Ref: https://www.mongodb.com/docs/manual/reference/operator/update-array/
@@ -120,74 +124,121 @@ internal static class BsonUpdateEvaluator
 
     // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/set/
     //   "Sets the value of a field in a document."
-    private static void ApplySet(BsonDocument doc, BsonDocument fields)
+    private static void ApplySet(BsonDocument doc, BsonDocument fields, PositionalContext ctx)
     {
         foreach (var element in fields)
         {
-            SetFieldPath(doc, element.Name, element.Value);
+            SetFieldPathPositional(doc, element.Name, element.Value, ctx);
         }
     }
 
     // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/unset/
     //   "Removes the specified field from a document."
-    private static void ApplyUnset(BsonDocument doc, BsonDocument fields)
+    private static void ApplyUnset(BsonDocument doc, BsonDocument fields, PositionalContext ctx)
     {
         foreach (var element in fields)
         {
-            RemoveFieldPath(doc, element.Name);
+            if (HasPositionalOperator(element.Name))
+                ApplyPositionalAction(doc, element.Name, ctx, (d, leaf) => d.Remove(leaf));
+            else
+                RemoveFieldPath(doc, element.Name);
         }
     }
 
     // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/inc/
     //   "Increments the value of the field by the specified amount."
-    private static void ApplyInc(BsonDocument doc, BsonDocument fields)
+    private static void ApplyInc(BsonDocument doc, BsonDocument fields, PositionalContext ctx)
     {
         foreach (var element in fields)
         {
-            var current = ResolveFieldPath(doc, element.Name);
-            var increment = element.Value;
-            var newValue = AddBsonValues(current, increment);
-            SetFieldPath(doc, element.Name, newValue);
+            if (HasPositionalOperator(element.Name))
+            {
+                ApplyPositionalAction(doc, element.Name, ctx, (d, leaf) =>
+                {
+                    var current = d.Contains(leaf) ? d[leaf] : new BsonInt32(0);
+                    d[leaf] = AddBsonValues(current, element.Value);
+                });
+            }
+            else
+            {
+                var current = ResolveFieldPath(doc, element.Name);
+                var newValue = AddBsonValues(current, element.Value);
+                SetFieldPath(doc, element.Name, newValue);
+            }
         }
     }
 
     // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/mul/
     //   "Multiplies the value of the field by the specified amount."
-    private static void ApplyMul(BsonDocument doc, BsonDocument fields)
+    private static void ApplyMul(BsonDocument doc, BsonDocument fields, PositionalContext ctx)
     {
         foreach (var element in fields)
         {
-            var current = ResolveFieldPath(doc, element.Name);
-            if (current == BsonNull.Value) current = new BsonInt32(0);
-            var multiplier = element.Value;
-            var newValue = MultiplyBsonValues(current, multiplier);
-            SetFieldPath(doc, element.Name, newValue);
+            if (HasPositionalOperator(element.Name))
+            {
+                ApplyPositionalAction(doc, element.Name, ctx, (d, leaf) =>
+                {
+                    var current = d.Contains(leaf) ? d[leaf] : new BsonInt32(0);
+                    d[leaf] = MultiplyBsonValues(current, element.Value);
+                });
+            }
+            else
+            {
+                var current = ResolveFieldPath(doc, element.Name);
+                if (current == BsonNull.Value) current = new BsonInt32(0);
+                var newValue = MultiplyBsonValues(current, element.Value);
+                SetFieldPath(doc, element.Name, newValue);
+            }
         }
     }
 
     // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/min/
     //   "Updates the value of the field to the specified value if the specified value
     //    is less than the current value of the field."
-    private static void ApplyMin(BsonDocument doc, BsonDocument fields)
+    private static void ApplyMin(BsonDocument doc, BsonDocument fields, PositionalContext ctx)
     {
         foreach (var element in fields)
         {
-            var current = ResolveFieldPath(doc, element.Name);
-            if (current == BsonNull.Value || BsonValueComparer.Instance.Compare(element.Value, current) < 0)
-                SetFieldPath(doc, element.Name, element.Value);
+            if (HasPositionalOperator(element.Name))
+            {
+                ApplyPositionalAction(doc, element.Name, ctx, (d, leaf) =>
+                {
+                    var current = d.Contains(leaf) ? d[leaf] : BsonNull.Value;
+                    if (current == BsonNull.Value || BsonValueComparer.Instance.Compare(element.Value, current) < 0)
+                        d[leaf] = element.Value;
+                });
+            }
+            else
+            {
+                var current = ResolveFieldPath(doc, element.Name);
+                if (current == BsonNull.Value || BsonValueComparer.Instance.Compare(element.Value, current) < 0)
+                    SetFieldPath(doc, element.Name, element.Value);
+            }
         }
     }
 
     // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/max/
     //   "Updates the value of the field to the specified value if the specified value
     //    is greater than the current value of the field."
-    private static void ApplyMax(BsonDocument doc, BsonDocument fields)
+    private static void ApplyMax(BsonDocument doc, BsonDocument fields, PositionalContext ctx)
     {
         foreach (var element in fields)
         {
-            var current = ResolveFieldPath(doc, element.Name);
-            if (current == BsonNull.Value || BsonValueComparer.Instance.Compare(element.Value, current) > 0)
-                SetFieldPath(doc, element.Name, element.Value);
+            if (HasPositionalOperator(element.Name))
+            {
+                ApplyPositionalAction(doc, element.Name, ctx, (d, leaf) =>
+                {
+                    var current = d.Contains(leaf) ? d[leaf] : BsonNull.Value;
+                    if (current == BsonNull.Value || BsonValueComparer.Instance.Compare(element.Value, current) > 0)
+                        d[leaf] = element.Value;
+                });
+            }
+            else
+            {
+                var current = ResolveFieldPath(doc, element.Name);
+                if (current == BsonNull.Value || BsonValueComparer.Instance.Compare(element.Value, current) > 0)
+                    SetFieldPath(doc, element.Name, element.Value);
+            }
         }
     }
 
@@ -210,20 +261,23 @@ internal static class BsonUpdateEvaluator
 
     // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/currentDate/
     //   "Sets the value of a field to current date, either as a Date or a Timestamp."
-    private static void ApplyCurrentDate(BsonDocument doc, BsonDocument fields)
+    private static void ApplyCurrentDate(BsonDocument doc, BsonDocument fields, PositionalContext ctx)
     {
         foreach (var element in fields)
         {
+            BsonValue dateVal;
             if (element.Value.IsBsonDocument)
             {
                 var spec = element.Value.AsBsonDocument;
                 if (spec.Contains("$type") && spec["$type"].AsString == "timestamp")
                 {
-                    SetFieldPath(doc, element.Name, new BsonTimestamp((int)DateTimeOffset.UtcNow.ToUnixTimeSeconds(), 1));
+                    dateVal = new BsonTimestamp((int)DateTimeOffset.UtcNow.ToUnixTimeSeconds(), 1);
+                    SetFieldPathPositional(doc, element.Name, dateVal, ctx);
                     continue;
                 }
             }
-            SetFieldPath(doc, element.Name, new BsonDateTime(DateTime.UtcNow));
+            dateVal = new BsonDateTime(DateTime.UtcNow);
+            SetFieldPathPositional(doc, element.Name, dateVal, ctx);
         }
     }
 
@@ -585,6 +639,301 @@ internal static class BsonUpdateEvaluator
             _ =>
                 new BsonInt32(a.ToInt32() * b.ToInt32()),
         };
+    }
+
+    #endregion
+
+    #region Positional Operators
+
+    /// <summary>
+    /// Context for positional update operators ($, $[], $[identifier]).
+    /// </summary>
+    private record PositionalContext(
+        int MatchedArrayIndex,
+        string? MatchedArrayField,
+        IReadOnlyList<BsonDocument>? ArrayFilters);
+
+    /// <summary>
+    /// Returns true if the path contains a positional operator ($, $[], or $[identifier]).
+    /// </summary>
+    private static bool HasPositionalOperator(string path)
+    {
+        var parts = path.Split('.');
+        return parts.Any(p => p == "$" || p == "$[]" || (p.StartsWith("$[") && p.EndsWith("]")));
+    }
+
+    /// <summary>
+    /// Sets a value at a path that may contain positional operators.
+    /// Delegates to SetFieldPath if no positional operators are present.
+    /// </summary>
+    /// <remarks>
+    /// Ref: https://www.mongodb.com/docs/manual/reference/operator/update/positional/
+    ///   "The positional $ operator identifies an element in an array."
+    /// Ref: https://www.mongodb.com/docs/manual/reference/operator/update/positional-all/
+    ///   "The all positional operator $[] indicates all elements in the array."
+    /// Ref: https://www.mongodb.com/docs/manual/reference/operator/update/positional-filtered/
+    ///   "The filtered positional operator $[<identifier>] identifies array elements
+    ///    that match the arrayFilters conditions."
+    /// </remarks>
+    private static void SetFieldPathPositional(BsonDocument doc, string path, BsonValue value, PositionalContext ctx)
+    {
+        if (!HasPositionalOperator(path))
+        {
+            SetFieldPath(doc, path, value);
+            return;
+        }
+
+        ApplyPositionalAction(doc, path, ctx, (d, leaf) => d[leaf] = value);
+    }
+
+    /// <summary>
+    /// Applies an action to elements targeted by positional operators in the path.
+    /// </summary>
+    private static void ApplyPositionalAction(BsonDocument doc, string path, PositionalContext ctx,
+        Action<BsonDocument, string> action)
+    {
+        var parts = path.Split('.');
+        ApplyPositionalRecursive(doc, parts, 0, ctx, action);
+    }
+
+    private static void ApplyPositionalRecursive(BsonDocument doc, string[] parts, int partIndex,
+        PositionalContext ctx, Action<BsonDocument, string> action)
+    {
+        if (partIndex >= parts.Length) return;
+
+        var part = parts[partIndex];
+        bool isLast = partIndex == parts.Length - 1;
+
+        if (part == "$")
+        {
+            // $ positional: use the matched array index
+            // The previous part is the array field
+            // We should already be inside the array element at this point
+            // $ is resolved by walking to the matched index of the parent array
+            if (partIndex == 0)
+            {
+                // $ at top level is the matched array field itself — shouldn't happen
+                return;
+            }
+            // We're already positioned by the caller. In the recursive model,
+            // $ means we already walked into the array. The parent calls this
+            // for only the matched index.
+            // This case is handled by the parent array iteration.
+            return;
+        }
+
+        if (part == "$[]")
+        {
+            // $[] all positional — shouldn't appear at top level; handled by parent
+            return;
+        }
+
+        if (part.StartsWith("$[") && part.EndsWith("]"))
+        {
+            // $[identifier] filtered positional — handled by parent
+            return;
+        }
+
+        // Regular field name
+        if (!doc.Contains(part)) return;
+        var fieldVal = doc[part];
+
+        // Check if the NEXT part is a positional operator
+        if (partIndex + 1 < parts.Length)
+        {
+            var nextPart = parts[partIndex + 1];
+            var remainingParts = parts.Skip(partIndex + 2).ToArray();
+
+            if (nextPart == "$")
+            {
+                // $ positional: operate on the matched index only
+                if (fieldVal is BsonArray arr && ctx.MatchedArrayIndex >= 0 && ctx.MatchedArrayIndex < arr.Count)
+                {
+                    if (remainingParts.Length == 0)
+                    {
+                        // e.g., "scores.$" → operate on arr[matchedIndex]
+                        var wrapper = CreateArrayIndexWrapper(arr, ctx.MatchedArrayIndex);
+                        action(wrapper, "_v");
+                        arr[ctx.MatchedArrayIndex] = wrapper["_v"];
+                    }
+                    else
+                    {
+                        // e.g., "items.$.qty" → navigate into arr[matchedIndex].qty
+                        if (arr[ctx.MatchedArrayIndex] is BsonDocument subDoc)
+                        {
+                            ApplyPositionalRecursive(subDoc, remainingParts, 0, ctx, action);
+                        }
+                    }
+                }
+                return;
+            }
+
+            if (nextPart == "$[]")
+            {
+                // $[] all positional: operate on all elements
+                if (fieldVal is BsonArray arr)
+                {
+                    for (int i = 0; i < arr.Count; i++)
+                    {
+                        if (remainingParts.Length == 0)
+                        {
+                            var wrapper = CreateArrayIndexWrapper(arr, i);
+                            action(wrapper, "_v");
+                            arr[i] = wrapper["_v"];
+                        }
+                        else if (arr[i] is BsonDocument subDoc)
+                        {
+                            ApplyPositionalRecursive(subDoc, remainingParts, 0, ctx, action);
+                        }
+                    }
+                }
+                return;
+            }
+
+            if (nextPart.StartsWith("$[") && nextPart.EndsWith("]"))
+            {
+                // $[identifier] filtered positional
+                var identifier = nextPart[2..^1]; // extract identifier name
+                if (fieldVal is BsonArray arr && ctx.ArrayFilters != null)
+                {
+                    // Find the matching filter for this identifier
+                    var filter = FindArrayFilter(ctx.ArrayFilters, identifier);
+                    if (filter != null)
+                    {
+                        for (int i = 0; i < arr.Count; i++)
+                        {
+                            if (MatchesArrayFilter(arr[i], filter, identifier))
+                            {
+                                if (remainingParts.Length == 0)
+                                {
+                                    var wrapper = CreateArrayIndexWrapper(arr, i);
+                                    action(wrapper, "_v");
+                                    arr[i] = wrapper["_v"];
+                                }
+                                else if (arr[i] is BsonDocument subDoc)
+                                {
+                                    ApplyPositionalRecursive(subDoc, remainingParts, 0, ctx, action);
+                                }
+                            }
+                        }
+                    }
+                }
+                return;
+            }
+        }
+
+        // Regular navigation: go deeper
+        if (isLast)
+        {
+            action(doc, part);
+        }
+        else if (fieldVal is BsonDocument subDoc2)
+        {
+            ApplyPositionalRecursive(subDoc2, parts, partIndex + 1, ctx, action);
+        }
+    }
+
+    /// <summary>Creates a wrapper doc to use as an action target for array element updates.</summary>
+    private static BsonDocument CreateArrayIndexWrapper(BsonArray arr, int index)
+    {
+        return new BsonDocument("_v", arr[index]);
+    }
+
+    /// <summary>Finds the array filter definition for a given identifier.</summary>
+    private static BsonDocument? FindArrayFilter(IReadOnlyList<BsonDocument> filters, string identifier)
+    {
+        // Array filters use the identifier as a prefix in field names
+        // e.g., identifier "elem" matches filter { "elem": { "$lt": 50 } } or { "elem.status": "pending" }
+        return filters.FirstOrDefault(f =>
+            f.Names.Any(n => n == identifier || n.StartsWith(identifier + ".")));
+    }
+
+    /// <summary>Tests whether an array element matches the given array filter.</summary>
+    private static bool MatchesArrayFilter(BsonValue element, BsonDocument filter, string identifier)
+    {
+        // Rewrite filter to replace identifier prefix with actual field paths
+        // For scalar elements: { "elem": { "$lt": 50 } } → test element < 50
+        // For subdoc elements: { "elem.status": "pending" } → test element.status == "pending"
+        var rewrittenFilter = new BsonDocument();
+        foreach (var el in filter)
+        {
+            if (el.Name == identifier)
+            {
+                // Direct scalar comparison: wrap element in a doc
+                rewrittenFilter["_v"] = el.Value;
+            }
+            else if (el.Name.StartsWith(identifier + "."))
+            {
+                // Subdocument field: strip the identifier prefix
+                var subPath = el.Name.Substring(identifier.Length + 1);
+                rewrittenFilter[subPath] = el.Value;
+            }
+        }
+
+        if (element is BsonDocument doc)
+        {
+            return BsonFilterEvaluator.Matches(doc, rewrittenFilter);
+        }
+
+        // Scalar element: wrap in { "_v": element } and match against rewritten filter
+        var wrapper = new BsonDocument("_v", element);
+        return BsonFilterEvaluator.Matches(wrapper, rewrittenFilter);
+    }
+
+    /// <summary>
+    /// Determines the matched array index for the $ positional operator by finding
+    /// which array element was matched by the query filter.
+    /// </summary>
+    internal static (int index, string? field) FindMatchedArrayIndex(BsonDocument document, BsonDocument filter)
+    {
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/positional/
+        //   "The positional $ operator acts as a placeholder for the first element
+        //    that matches the query document."
+        foreach (var el in filter)
+        {
+            if (el.Name.StartsWith("$")) continue; // Skip $and, $or, etc.
+
+            var dotIndex = el.Name.IndexOf('.');
+            string arrayField;
+            string? subField = null;
+
+            if (dotIndex > 0)
+            {
+                // "items.name" → arrayField = "items", subField = "name"
+                arrayField = el.Name.Substring(0, dotIndex);
+                subField = el.Name.Substring(dotIndex + 1);
+            }
+            else
+            {
+                arrayField = el.Name;
+            }
+
+            if (!document.Contains(arrayField)) continue;
+            var fieldVal = document[arrayField];
+            if (fieldVal is not BsonArray arr) continue;
+
+            // Find the first matching element
+            for (int i = 0; i < arr.Count; i++)
+            {
+                bool matches;
+                if (subField != null && arr[i] is BsonDocument subDoc)
+                {
+                    // Match against subdocument field
+                    var subFilter = new BsonDocument(subField, el.Value);
+                    matches = BsonFilterEvaluator.Matches(subDoc, subFilter);
+                }
+                else
+                {
+                    // Direct value match
+                    matches = arr[i].Equals(el.Value);
+                }
+
+                if (matches)
+                    return (i, arrayField);
+            }
+        }
+
+        return (-1, null);
     }
 
     #endregion

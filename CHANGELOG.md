@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.12] - 2026-05-11
+
+### Added
+- Positional update operator `$` — updates the first array element matching the query filter
+- All positional update operator `$[]` — updates all elements in an array
+- Filtered positional update operator `$[<identifier>]` — updates array elements matching `arrayFilters` conditions
+- Support for positional operators in `$set`, `$unset`, `$inc`, `$mul`, `$min`, `$max`, `$currentDate`, and `$setOnInsert`
+- Positional operators work with `UpdateOne`, `UpdateMany`, and `FindOneAndUpdate`
+- 9 new integration tests covering all three positional operator variants
+
 ## [0.11.11] - 2026-05-11
 
 ### Fixed

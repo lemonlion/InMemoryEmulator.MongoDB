@@ -524,6 +524,10 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         OperationLog.Record(new OperationRecord { Type = "UpdateOne", Filter = renderedFilter?.DeepClone().AsBsonDocument, Update = updateBson is BsonDocument ud ? ud.DeepClone().AsBsonDocument : null });
         ValidateUpdate(updateBson);
 
+        // Ref: https://www.mongodb.com/docs/manual/reference/method/db.collection.updateOne/
+        //   "arrayFilters: An array of filter documents that determine which array elements to modify."
+        var renderedArrayFilters = RenderArrayFilters(options?.ArrayFilters);
+
         var matches = FindInternalBson(filter);
 
         if (matches.Count == 0)
@@ -533,7 +537,8 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                 var upsertDoc = updateBson is BsonArray
                     ? CreateUpsertDocumentFromFilter(filter)
                     : CreateUpsertDocument(filter, updateBson.AsBsonDocument);
-                var upsertResult = ApplyUpdate(upsertDoc, updateBson, isUpsertInsert: true);
+                var upsertResult = ApplyUpdate(upsertDoc, updateBson, isUpsertInsert: true,
+                    arrayFilters: renderedArrayFilters);
                 DocumentStore.EnsureId(upsertResult);
                 _indexManager.ValidateDocument(upsertResult);
                 var inserted = _store.Insert(upsertResult);
@@ -546,15 +551,28 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         var target = matches[0];
         var targetId = target["_id"];
 
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/positional/
+        //   "The positional $ operator acts as a placeholder for the first element
+        //    that matches the query document."
+        var (matchedIdx, matchedField) = renderedFilter != null
+            ? BsonUpdateEvaluator.FindMatchedArrayIndex(target, renderedFilter)
+            : (-1, (string?)null);
+
         // Pre-validate: compute the updated doc and check unique indexes before committing
-        var previewDoc = ApplyUpdate(target.DeepClone().AsBsonDocument, updateBson, isUpsertInsert: false);
+        var previewDoc = ApplyUpdate(target.DeepClone().AsBsonDocument, updateBson, isUpsertInsert: false,
+            arrayFilters: renderedArrayFilters, matchedArrayIndex: matchedIdx, matchedArrayField: matchedField);
         previewDoc["_id"] = targetId;
         _indexManager.ValidateDocument(previewDoc, excludeId: targetId);
 
         // Use DocumentStore.Update for atomic apply — prevents lost updates under concurrency
         var (matched, modified, beforeChange) = _store.Update(targetId, currentDoc =>
         {
-            var applied = ApplyUpdate(currentDoc, updateBson, isUpsertInsert: false);
+            // Recompute matched index against the current doc state
+            var (curIdx, curField) = renderedFilter != null
+                ? BsonUpdateEvaluator.FindMatchedArrayIndex(currentDoc, renderedFilter)
+                : (-1, (string?)null);
+            var applied = ApplyUpdate(currentDoc, updateBson, isUpsertInsert: false,
+                arrayFilters: renderedArrayFilters, matchedArrayIndex: curIdx, matchedArrayField: curField);
             applied["_id"] = targetId;
             return applied;
         });
@@ -580,7 +598,10 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
     {
         cancellationToken.ThrowIfCancellationRequested();
         var updateBson = RenderUpdate(update);
+        var renderedFilter = RenderFilter(filter);
         ValidateUpdate(updateBson);
+
+        var renderedArrayFilters = RenderArrayFilters(options?.ArrayFilters);
 
         var matches = FindInternalBson(filter);
 
@@ -591,7 +612,8 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                 var upsertDoc = updateBson is BsonArray
                     ? CreateUpsertDocumentFromFilter(filter)
                     : CreateUpsertDocument(filter, updateBson.AsBsonDocument);
-                var upsertResult = ApplyUpdate(upsertDoc, updateBson, isUpsertInsert: true);
+                var upsertResult = ApplyUpdate(upsertDoc, updateBson, isUpsertInsert: true,
+                    arrayFilters: renderedArrayFilters);
                 DocumentStore.EnsureId(upsertResult);
                 _indexManager.ValidateDocument(upsertResult);
                 var inserted = _store.Insert(upsertResult);
@@ -606,15 +628,24 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         {
             var targetId = target["_id"];
 
+            var (matchedIdx, matchedField) = renderedFilter != null
+                ? BsonUpdateEvaluator.FindMatchedArrayIndex(target, renderedFilter)
+                : (-1, (string?)null);
+
             // Pre-validate: compute the updated doc and check unique indexes before committing
-            var previewDoc = ApplyUpdate(target.DeepClone().AsBsonDocument, updateBson, isUpsertInsert: false);
+            var previewDoc = ApplyUpdate(target.DeepClone().AsBsonDocument, updateBson, isUpsertInsert: false,
+                arrayFilters: renderedArrayFilters, matchedArrayIndex: matchedIdx, matchedArrayField: matchedField);
             previewDoc["_id"] = targetId;
             _indexManager.ValidateDocument(previewDoc, excludeId: targetId);
 
             // Use DocumentStore.Update for atomic apply and correct Update change type (not Replace)
             var (matched, modified, beforeChange) = _store.Update(targetId, currentDoc =>
             {
-                var applied = ApplyUpdate(currentDoc, updateBson, isUpsertInsert: false);
+                var (curIdx, curField) = renderedFilter != null
+                    ? BsonUpdateEvaluator.FindMatchedArrayIndex(currentDoc, renderedFilter)
+                    : (-1, (string?)null);
+                var applied = ApplyUpdate(currentDoc, updateBson, isUpsertInsert: false,
+                    arrayFilters: renderedArrayFilters, matchedArrayIndex: curIdx, matchedArrayField: curField);
                 applied["_id"] = targetId;
                 return applied;
             });
@@ -783,7 +814,10 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
     {
         cancellationToken.ThrowIfCancellationRequested();
         var updateBson = RenderUpdate(update);
+        var renderedFilter = RenderFilter(filter);
         ValidateUpdate(updateBson);
+
+        var renderedArrayFilters = RenderArrayFilters(options?.ArrayFilters);
 
         var matches = FindInternalBson(filter);
         if (options?.Sort != null)
@@ -801,7 +835,8 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                 var upsertDoc = updateBson is BsonArray
                     ? CreateUpsertDocumentFromFilter(filter)
                     : CreateUpsertDocument(filter, updateBson.AsBsonDocument);
-                var upsertResult = ApplyUpdate(upsertDoc, updateBson, isUpsertInsert: true);
+                var upsertResult = ApplyUpdate(upsertDoc, updateBson, isUpsertInsert: true,
+                    arrayFilters: renderedArrayFilters);
                 DocumentStore.EnsureId(upsertResult);
                 _indexManager.ValidateDocument(upsertResult);
                 var inserted = _store.Insert(upsertResult);
@@ -819,15 +854,24 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         var target = matches[0];
         var targetId = target["_id"];
 
+        var (matchedIdx, matchedField) = renderedFilter != null
+            ? BsonUpdateEvaluator.FindMatchedArrayIndex(target, renderedFilter)
+            : (-1, (string?)null);
+
         // Pre-validate: compute the updated doc and check unique indexes before committing
-        var previewDoc = ApplyUpdate(target.DeepClone().AsBsonDocument, updateBson);
+        var previewDoc = ApplyUpdate(target.DeepClone().AsBsonDocument, updateBson,
+            arrayFilters: renderedArrayFilters, matchedArrayIndex: matchedIdx, matchedArrayField: matchedField);
         previewDoc["_id"] = targetId;
         _indexManager.ValidateDocument(previewDoc, excludeId: targetId);
 
         // Use DocumentStore.Update for atomic apply and correct Update change type
         var (matched, modified, beforeChange) = _store.Update(targetId, currentDoc =>
         {
-            var applied = ApplyUpdate(currentDoc, updateBson);
+            var (curIdx, curField) = renderedFilter != null
+                ? BsonUpdateEvaluator.FindMatchedArrayIndex(currentDoc, renderedFilter)
+                : (-1, (string?)null);
+            var applied = ApplyUpdate(currentDoc, updateBson,
+                arrayFilters: renderedArrayFilters, matchedArrayIndex: curIdx, matchedArrayField: curField);
             applied["_id"] = targetId;
             return applied;
         });
@@ -1331,7 +1375,8 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
     /// Ref: https://www.mongodb.com/docs/manual/reference/method/db.collection.updateOne/
     ///   "Starting in MongoDB 4.2, the method can accept an aggregation pipeline."
     /// </remarks>
-    private BsonDocument ApplyUpdate(BsonDocument target, BsonValue updateBson, bool isUpsertInsert = false)
+    private BsonDocument ApplyUpdate(BsonDocument target, BsonValue updateBson, bool isUpsertInsert = false,
+        IReadOnlyList<BsonDocument>? arrayFilters = null, int matchedArrayIndex = -1, string? matchedArrayField = null)
     {
         if (updateBson is BsonArray pipelineStages)
         {
@@ -1349,7 +1394,21 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
             return result.Count > 0 ? result[0] : target;
         }
 
-        return BsonUpdateEvaluator.Apply(target, updateBson.AsBsonDocument, isUpsertInsert: isUpsertInsert);
+        return BsonUpdateEvaluator.Apply(target, updateBson.AsBsonDocument,
+            arrayFilters: arrayFilters, isUpsertInsert: isUpsertInsert,
+            matchedArrayIndex: matchedArrayIndex, matchedArrayField: matchedArrayField);
+    }
+
+    /// <summary>
+    /// Renders ArrayFilterDefinitions from UpdateOptions into BsonDocuments.
+    /// </summary>
+    private IReadOnlyList<BsonDocument>? RenderArrayFilters(IEnumerable<ArrayFilterDefinition>? arrayFilters)
+    {
+        if (arrayFilters == null) return null;
+        var registry = BsonSerializer.SerializerRegistry;
+        return arrayFilters
+            .Select(af => af.Render(registry.GetSerializer<BsonDocument>(), registry, MongoDB.Driver.Linq.LinqProvider.V3))
+            .ToList();
     }
 
     /// <summary>
