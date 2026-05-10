@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.5] - 2026-05-10
+
+### Fixed
+- `Distinct` now unwraps array fields into individual elements per MongoDB spec (each array element treated as a separate value)
+- `UpdateMany` now uses atomic `DocumentStore.Update` instead of `Replace`, recording correct `Update` change type in change log
+- `UpdateMany` now publishes change stream events for each modified document
+- `DeleteMany` now publishes change stream events for each deleted document
+- `FindOneAndDelete` now publishes change stream delete event
+- `FindOneAndReplace` now publishes change stream replace event
+- `FindOneAndUpdate` now publishes change stream update event
+
+### Added
+- 9 new integration tests covering Distinct array unwinding and change stream event publishing
+
+## [0.11.4] - 2026-05-10
+
+### Fixed
+- Array element iteration for comparison, `$regex`, and `$mod` filter operators
+- Dot-notation field resolution through arrays
+- Implicit `BsonRegularExpression` matching in equality filters
+- `$in`/`$nin` with `BsonRegularExpression` values
+- `$type` missing aliases (`timestamp`, `javascript`, `minKey`, `maxKey`, etc.) and array element type checking
+- Sort now extracts min (ascending) / max (descending) from array fields
+- `RenameCollection` atomicity (check target existence before removing source)
+- `$substr` no longer crashes with negative start index (returns empty string per spec)
+
+### Added
+- 25 new integration tests covering array field matching, edge cases, and bug fixes
+
 ## [0.11.0] - 2025-07-18
 
 ### Added

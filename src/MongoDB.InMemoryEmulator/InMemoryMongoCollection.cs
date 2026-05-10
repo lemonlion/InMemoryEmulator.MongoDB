@@ -403,6 +403,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         foreach (var doc in matches)
         {
             _store.Remove(doc["_id"]);
+            PublishChangeEvent(ChangeStreamOperationType.Delete, doc);
         }
         return new DeleteResult.Acknowledged(matches.Count);
     }
@@ -588,11 +589,29 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         foreach (var target in matches)
         {
             var targetId = target["_id"];
-            var updated = ApplyUpdate(target, updateBson, isUpsertInsert: false);
-            updated["_id"] = targetId;
-            _indexManager.ValidateDocument(updated, excludeId: targetId);
-            if (_store.Replace(targetId, updated))
+
+            // Pre-validate: compute the updated doc and check unique indexes before committing
+            var previewDoc = ApplyUpdate(target.DeepClone().AsBsonDocument, updateBson, isUpsertInsert: false);
+            previewDoc["_id"] = targetId;
+            _indexManager.ValidateDocument(previewDoc, excludeId: targetId);
+
+            // Use DocumentStore.Update for atomic apply and correct Update change type (not Replace)
+            var (matched, modified, beforeChange) = _store.Update(targetId, currentDoc =>
+            {
+                var applied = ApplyUpdate(currentDoc, updateBson, isUpsertInsert: false);
+                applied["_id"] = targetId;
+                return applied;
+            });
+
+            if (matched && modified)
+            {
                 modifiedCount++;
+                if (beforeChange != null)
+                {
+                    var afterDoc = _store.Get(targetId);
+                    if (afterDoc != null) PublishChangeEvent(ChangeStreamOperationType.Update, afterDoc, beforeChange);
+                }
+            }
         }
         return new UpdateResult.Acknowledged(matches.Count, modifiedCount, null);
     }
@@ -636,6 +655,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
 
         var target = matches[0];
         _store.Remove(target["_id"]);
+        PublishChangeEvent(ChangeStreamOperationType.Delete, target);
 
         var result = ApplyProjectionIfNeeded(target, options?.Projection);
         return BsonSerializer.Deserialize<TProjection>(result);
@@ -710,6 +730,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         replacementBson["_id"] = targetId;
         _indexManager.ValidateDocument(replacementBson, excludeId: targetId);
         _store.Replace(targetId, replacementBson);
+        PublishChangeEvent(ChangeStreamOperationType.Replace, replacementBson, target);
 
         // Ref: https://www.mongodb.com/docs/manual/reference/command/findAndModify/
         //   "returnDocument: 'before' returns the original document, 'after' returns the modified document."
@@ -779,10 +800,12 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
 
         var target = matches[0];
         var targetId = target["_id"];
+        var beforeChange = target.DeepClone().AsBsonDocument;
         var updated = ApplyUpdate(target, updateBson);
         updated["_id"] = targetId;
         _indexManager.ValidateDocument(updated, excludeId: targetId);
         _store.Replace(targetId, updated);
+        PublishChangeEvent(ChangeStreamOperationType.Update, updated, beforeChange);
 
         var resultDoc = options?.ReturnDocument == ReturnDocument.After ? updated : target;
         var projected = ApplyProjectionIfNeeded(resultDoc, options?.Projection);
@@ -904,12 +927,21 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         {
             var val = BsonFilterEvaluator.ResolveFieldPath(doc, fieldName);
             if (val == BsonNull.Value) continue;
-            if (!seen.Add(val)) continue;
 
-            if (typeof(TField) == typeof(BsonValue))
-                results.Add((TField)(object)val);
-            else
-                results.Add((TField)BsonTypeMapper.MapToDotNetValue(val));
+            // Ref: https://www.mongodb.com/docs/manual/reference/command/distinct/
+            //   "If the value of the specified field is an array, distinct considers each element
+            //    of the array as a separate value."
+            var elements = val is BsonArray arr ? arr.Values : new[] { val };
+            foreach (var element in elements)
+            {
+                if (element == BsonNull.Value) continue;
+                if (!seen.Add(element)) continue;
+
+                if (typeof(TField) == typeof(BsonValue))
+                    results.Add((TField)(object)element);
+                else
+                    results.Add((TField)BsonTypeMapper.MapToDotNetValue(element));
+            }
         }
 
         return new InMemoryAsyncCursor<TField>(results, results.Count + 1);
