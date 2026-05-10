@@ -452,7 +452,11 @@ internal static class AggregationExpressionEvaluator
     private static BsonValue EvalStringUnary(BsonDocument doc, BsonValue args, BsonDocument? variables, Func<string, string> fn)
     {
         var val = Evaluate(doc, args is BsonArray a ? a[0] : args, variables);
-        if (val == BsonNull.Value) return BsonNull.Value;
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/toUpper/
+        //   "If the argument resolves to null, $toUpper returns an empty string ''." (same for $toLower)
+        if (val == BsonNull.Value) return new BsonString("");
+        if (!val.IsString)
+            throw MongoErrors.BadValue($"$toUpper/$toLower only supports string types, not {val.BsonType}");
         return new BsonString(fn(val.AsString));
     }
 
@@ -498,7 +502,12 @@ internal static class AggregationExpressionEvaluator
     private static BsonValue EvalStrLen(BsonDocument doc, BsonValue args, BsonDocument? variables, Func<string, int> fn)
     {
         var val = Evaluate(doc, args is BsonArray a ? a[0] : args, variables);
-        if (val == BsonNull.Value) return BsonNull.Value;
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/strLenBytes/
+        //   "$strLenBytes requires a string argument, found: <type>"
+        if (val == BsonNull.Value)
+            throw MongoErrors.BadValue($"$strLenBytes requires a string argument, found: null");
+        if (!val.IsString)
+            throw MongoErrors.BadValue($"$strLenBytes requires a string argument, found: {val.BsonType}");
         return new BsonInt32(fn(val.AsString));
     }
 
@@ -583,6 +592,10 @@ internal static class AggregationExpressionEvaluator
         var spec = args.AsBsonDocument;
         var input = Evaluate(doc, spec["input"], variables);
         if (input == BsonNull.Value) return BsonNull.Value;
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/regexMatch/
+        //   "$regexMatch needs 'input' to be of type string"
+        if (!input.IsString)
+            throw MongoErrors.BadValue($"$regexMatch needs 'input' to be of type string, found: {input.BsonType}");
         var (regex, opts) = ExtractRegex(spec, variables);
         var ro = ParseRegexOptions(opts);
         return (BsonBoolean)Regex.IsMatch(input.AsString, regex, ro);
@@ -593,6 +606,10 @@ internal static class AggregationExpressionEvaluator
         var spec = args.AsBsonDocument;
         var input = Evaluate(doc, spec["input"], variables);
         if (input == BsonNull.Value) return BsonNull.Value;
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/regexFind/
+        //   "$regexFind needs 'input' to be of type string"
+        if (!input.IsString)
+            throw MongoErrors.BadValue($"$regexFind needs 'input' to be of type string, found: {input.BsonType}");
         var (regex, opts) = ExtractRegex(spec, variables);
         var m = Regex.Match(input.AsString, regex, ParseRegexOptions(opts));
         if (!m.Success) return BsonNull.Value;
@@ -604,6 +621,10 @@ internal static class AggregationExpressionEvaluator
         var spec = args.AsBsonDocument;
         var input = Evaluate(doc, spec["input"], variables);
         if (input == BsonNull.Value) return new BsonArray();
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/regexFindAll/
+        //   "$regexFindAll needs 'input' to be of type string"
+        if (!input.IsString)
+            throw MongoErrors.BadValue($"$regexFindAll needs 'input' to be of type string, found: {input.BsonType}");
         var (regex, opts) = ExtractRegex(spec, variables);
         var matches = Regex.Matches(input.AsString, regex, ParseRegexOptions(opts));
         var result = new BsonArray();
@@ -725,7 +746,12 @@ internal static class AggregationExpressionEvaluator
     private static BsonValue EvalSize(BsonDocument doc, BsonValue args, BsonDocument? variables)
     {
         var val = Evaluate(doc, args is BsonArray a ? a[0] : args, variables);
-        if (val == BsonNull.Value) return BsonNull.Value;
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/size/
+        //   "The argument for $size must resolve to an array."
+        if (val == BsonNull.Value)
+            throw MongoErrors.BadValue("The argument to $size must resolve to an array but was of type: null");
+        if (!val.IsBsonArray)
+            throw MongoErrors.BadValue($"The argument to $size must resolve to an array but was of type: {val.BsonType}");
         return new BsonInt32(val.AsBsonArray.Count);
     }
 

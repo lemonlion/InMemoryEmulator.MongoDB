@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.21] - 2026-05-11
+
+### Fixed
+- `$toUpper`/`$toLower` on `null` now returns empty string `""` — previously returned `null` (diverging from MongoDB docs)
+- `$toUpper`/`$toLower` on non-string values now throws proper `MongoCommandException` — previously threw `InvalidCastException`
+- `$size` (aggregation) on non-array values now throws proper `MongoCommandException` — previously threw `InvalidCastException`
+- `$strLenBytes`/`$strLenCP` on `null` now throws proper `MongoCommandException` — previously silently returned `null` (MongoDB rejects null arguments)
+- `$strLenBytes`/`$strLenCP` on non-string values now throws proper `MongoCommandException` — previously threw `InvalidCastException`
+- `$regexMatch`/`$regexFind`/`$regexFindAll` on non-string input now throws proper `MongoCommandException` — previously threw `InvalidCastException`
+
+### Added
+- 7 new integration tests covering `$toUpper`/`$toLower` null/non-string handling, `$size` non-array error, `$strLenBytes` null/non-string error, and `$regexMatch` non-string input error
+
 ## [0.11.20] - 2026-05-11
 
 ### Fixed
