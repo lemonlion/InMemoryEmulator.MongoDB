@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.13] - 2026-05-11
+
+### Fixed
+- Array update operators (`$push`, `$pull`, `$pullAll`, `$addToSet`, `$pop`) now support positional operators (`$`, `$[]`, `$[identifier]`) for nested array paths
+- `BulkWrite` now correctly forwards `ArrayFilters` from `UpdateOneModel` and `UpdateManyModel` to the underlying update operations
+
+### Added
+- 7 new integration tests covering array operators with positional paths and BulkWrite arrayFilters passthrough
+
 ## [0.11.12] - 2026-05-11
 
 ### Added

@@ -1088,7 +1088,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
 
                     case UpdateOneModel<TDocument> updateOne:
                         var updateResult = UpdateOne(updateOne.Filter, updateOne.Update,
-                            new UpdateOptions { IsUpsert = updateOne.IsUpsert }, cancellationToken);
+                            new UpdateOptions { IsUpsert = updateOne.IsUpsert, ArrayFilters = updateOne.ArrayFilters }, cancellationToken);
                         matchedCount += updateResult.MatchedCount;
                         modifiedCount += updateResult.ModifiedCount;
                         if (updateResult.UpsertedId != null)
@@ -1097,7 +1097,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
 
                     case UpdateManyModel<TDocument> updateMany:
                         var updateManyResult = UpdateMany(updateMany.Filter, updateMany.Update,
-                            new UpdateOptions { IsUpsert = updateMany.IsUpsert }, cancellationToken);
+                            new UpdateOptions { IsUpsert = updateMany.IsUpsert, ArrayFilters = updateMany.ArrayFilters }, cancellationToken);
                         matchedCount += updateManyResult.MatchedCount;
                         modifiedCount += updateManyResult.ModifiedCount;
                         if (updateManyResult.UpsertedId != null)

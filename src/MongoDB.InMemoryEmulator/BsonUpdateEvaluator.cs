@@ -75,19 +75,19 @@ internal static class BsonUpdateEvaluator
 
                 // Ref: https://www.mongodb.com/docs/manual/reference/operator/update-array/
                 case "$push":
-                    ApplyPush(result, element.Value.AsBsonDocument);
+                    ApplyPush(result, element.Value.AsBsonDocument, ctx);
                     break;
                 case "$pull":
-                    ApplyPull(result, element.Value.AsBsonDocument);
+                    ApplyPull(result, element.Value.AsBsonDocument, ctx);
                     break;
                 case "$pullAll":
-                    ApplyPullAll(result, element.Value.AsBsonDocument);
+                    ApplyPullAll(result, element.Value.AsBsonDocument, ctx);
                     break;
                 case "$addToSet":
-                    ApplyAddToSet(result, element.Value.AsBsonDocument);
+                    ApplyAddToSet(result, element.Value.AsBsonDocument, ctx);
                     break;
                 case "$pop":
-                    ApplyPop(result, element.Value.AsBsonDocument);
+                    ApplyPop(result, element.Value.AsBsonDocument, ctx);
                     break;
 
                 // Ref: https://www.mongodb.com/docs/manual/reference/operator/update-bitwise/
@@ -287,11 +287,28 @@ internal static class BsonUpdateEvaluator
 
     // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/push/
     //   "Appends a specified value to an array."
-    private static void ApplyPush(BsonDocument doc, BsonDocument fields)
+    private static void ApplyPush(BsonDocument doc, BsonDocument fields, PositionalContext ctx)
     {
         foreach (var element in fields)
         {
             var fieldPath = element.Name;
+
+            if (HasPositionalOperator(fieldPath))
+            {
+                ApplyPositionalAction(doc, fieldPath, ctx, (d, leaf) =>
+                {
+                    if (!d.Contains(leaf))
+                        d[leaf] = new BsonArray();
+                    if (d[leaf] is not BsonArray arr)
+                        throw MongoErrors.BadValue($"The field '{fieldPath}' must be an array but is of type {d[leaf].BsonType}");
+                    if (element.Value.IsBsonDocument && element.Value.AsBsonDocument.Contains("$each"))
+                        ApplyPushEach(arr, element.Value.AsBsonDocument);
+                    else
+                        arr.Add(element.Value);
+                });
+                continue;
+            }
+
             var current = ResolveFieldPath(doc, fieldPath);
 
             if (current == BsonNull.Value)
@@ -384,23 +401,41 @@ internal static class BsonUpdateEvaluator
 
     // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/pull/
     //   "Removes all array elements that match a specified query."
-    private static void ApplyPull(BsonDocument doc, BsonDocument fields)
+    private static void ApplyPull(BsonDocument doc, BsonDocument fields, PositionalContext ctx)
     {
         foreach (var element in fields)
         {
+            if (HasPositionalOperator(element.Name))
+            {
+                var condition = element.Value;
+                ApplyPositionalAction(doc, element.Name, ctx, (d, leaf) =>
+                {
+                    if (d[leaf] is not BsonArray arr) return;
+                    var toRemove = new List<int>();
+                    for (int i = 0; i < arr.Count; i++)
+                    {
+                        if (ShouldPull(arr[i], condition))
+                            toRemove.Add(i);
+                    }
+                    for (int i = toRemove.Count - 1; i >= 0; i--)
+                        arr.RemoveAt(toRemove[i]);
+                });
+                continue;
+            }
+
             var current = ResolveFieldPath(doc, element.Name);
             if (current is not BsonArray array) continue;
 
-            var condition = element.Value;
-            var toRemove = new List<int>();
+            var cond = element.Value;
+            var toRem = new List<int>();
             for (int i = 0; i < array.Count; i++)
             {
-                if (ShouldPull(array[i], condition))
-                    toRemove.Add(i);
+                if (ShouldPull(array[i], cond))
+                    toRem.Add(i);
             }
 
-            for (int i = toRemove.Count - 1; i >= 0; i--)
-                array.RemoveAt(toRemove[i]);
+            for (int i = toRem.Count - 1; i >= 0; i--)
+                array.RemoveAt(toRem[i]);
         }
     }
 
@@ -432,17 +467,32 @@ internal static class BsonUpdateEvaluator
 
     // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/pullAll/
     //   "Removes all instances of the specified values from an existing array."
-    private static void ApplyPullAll(BsonDocument doc, BsonDocument fields)
+    private static void ApplyPullAll(BsonDocument doc, BsonDocument fields, PositionalContext ctx)
     {
         foreach (var element in fields)
         {
+            if (HasPositionalOperator(element.Name))
+            {
+                var valuesToRemove = element.Value.AsBsonArray;
+                ApplyPositionalAction(doc, element.Name, ctx, (d, leaf) =>
+                {
+                    if (d[leaf] is not BsonArray arr) return;
+                    for (int i = arr.Count - 1; i >= 0; i--)
+                    {
+                        if (valuesToRemove.Any(v => v.Equals(arr[i])))
+                            arr.RemoveAt(i);
+                    }
+                });
+                continue;
+            }
+
             var current = ResolveFieldPath(doc, element.Name);
             if (current is not BsonArray array) continue;
 
-            var valuesToRemove = element.Value.AsBsonArray;
+            var vals = element.Value.AsBsonArray;
             for (int i = array.Count - 1; i >= 0; i--)
             {
-                if (valuesToRemove.Any(v => v.Equals(array[i])))
+                if (vals.Any(v => v.Equals(array[i])))
                     array.RemoveAt(i);
             }
         }
@@ -450,10 +500,36 @@ internal static class BsonUpdateEvaluator
 
     // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/addToSet/
     //   "Adds a value to an array unless the value is already present."
-    private static void ApplyAddToSet(BsonDocument doc, BsonDocument fields)
+    private static void ApplyAddToSet(BsonDocument doc, BsonDocument fields, PositionalContext ctx)
     {
         foreach (var element in fields)
         {
+            if (HasPositionalOperator(element.Name))
+            {
+                ApplyPositionalAction(doc, element.Name, ctx, (d, leaf) =>
+                {
+                    if (!d.Contains(leaf))
+                        d[leaf] = new BsonArray();
+                    if (d[leaf] is not BsonArray arr)
+                        throw MongoErrors.BadValue($"The field '{element.Name}' must be an array");
+                    if (element.Value.IsBsonDocument && element.Value.AsBsonDocument.Contains("$each"))
+                    {
+                        var items = element.Value.AsBsonDocument["$each"].AsBsonArray;
+                        foreach (var item in items)
+                        {
+                            if (!arr.Any(x => x.Equals(item)))
+                                arr.Add(item);
+                        }
+                    }
+                    else
+                    {
+                        if (!arr.Any(x => x.Equals(element.Value)))
+                            arr.Add(element.Value);
+                    }
+                });
+                continue;
+            }
+
             var current = ResolveFieldPath(doc, element.Name);
             if (current == BsonNull.Value)
             {
@@ -483,10 +559,24 @@ internal static class BsonUpdateEvaluator
 
     // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/pop/
     //   "Removes the first or last element of an array."
-    private static void ApplyPop(BsonDocument doc, BsonDocument fields)
+    private static void ApplyPop(BsonDocument doc, BsonDocument fields, PositionalContext ctx)
     {
         foreach (var element in fields)
         {
+            if (HasPositionalOperator(element.Name))
+            {
+                var direction = element.Value.ToInt32();
+                ApplyPositionalAction(doc, element.Name, ctx, (d, leaf) =>
+                {
+                    if (d[leaf] is not BsonArray arr || arr.Count == 0) return;
+                    if (direction == -1)
+                        arr.RemoveAt(0);
+                    else
+                        arr.RemoveAt(arr.Count - 1);
+                });
+                continue;
+            }
+
             var current = ResolveFieldPath(doc, element.Name);
             if (current is not BsonArray array || array.Count == 0) continue;
 
