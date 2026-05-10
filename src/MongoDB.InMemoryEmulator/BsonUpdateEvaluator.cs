@@ -438,7 +438,11 @@ internal static class BsonUpdateEvaluator
             }
 
             var current = ResolveFieldPath(doc, element.Name);
-            if (current is not BsonArray array) continue;
+            if (current == BsonNull.Value) continue; // missing field is a no-op
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/pull/
+            //   "If the specified <field> is not an array, the operation will fail."
+            if (current is not BsonArray array)
+                throw MongoErrors.BadValue($"Cannot apply $pull to a non-array value");
 
             var cond = element.Value;
             var toRem = new List<int>();
@@ -501,7 +505,11 @@ internal static class BsonUpdateEvaluator
             }
 
             var current = ResolveFieldPath(doc, element.Name);
-            if (current is not BsonArray array) continue;
+            if (current == BsonNull.Value) continue; // missing field is a no-op
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/pullAll/
+            //   "If a <field> is not an array, the operation will fail."
+            if (current is not BsonArray array)
+                throw MongoErrors.BadValue($"Cannot apply $pullAll to a non-array value");
 
             var vals = element.Value.AsBsonArray;
             for (int i = array.Count - 1; i >= 0; i--)
@@ -592,7 +600,12 @@ internal static class BsonUpdateEvaluator
             }
 
             var current = ResolveFieldPath(doc, element.Name);
-            if (current is not BsonArray array || array.Count == 0) continue;
+            if (current == BsonNull.Value) continue; // missing field is a no-op
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/pop/
+            //   "If <field> is not an array, $pop fails."
+            if (current is not BsonArray array)
+                throw MongoErrors.BadValue($"Path '{element.Name}' contains an element of non-array type '{current.BsonType}'");
+            if (array.Count == 0) continue;
 
             if (element.Value.ToInt32() == -1)
                 array.RemoveAt(0);
@@ -797,6 +810,11 @@ internal static class BsonUpdateEvaluator
     {
         if (a == BsonNull.Value) a = new BsonInt32(0);
 
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/inc/
+        //   "Cannot apply $inc to a value of non-numeric type."
+        if (!a.IsNumeric)
+            throw MongoErrors.BadValue($"Cannot apply $inc to a value of non-numeric type {a.BsonType}");
+
         return (a.BsonType, b.BsonType) switch
         {
             (BsonType.Double, _) or (_, BsonType.Double) =>
@@ -812,6 +830,11 @@ internal static class BsonUpdateEvaluator
 
     private static BsonValue MultiplyBsonValues(BsonValue a, BsonValue b)
     {
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/mul/
+        //   "Cannot apply $mul to a value of non-numeric type."
+        if (!a.IsNumeric)
+            throw MongoErrors.BadValue($"Cannot apply $mul to a value of non-numeric type {a.BsonType}");
+
         return (a.BsonType, b.BsonType) switch
         {
             (BsonType.Double, _) or (_, BsonType.Double) =>

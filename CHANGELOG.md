@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.17] - 2026-05-11
+
+### Fixed
+- `$pop` on non-array field now throws proper error instead of silently no-oping
+- `$pull` on non-array field now throws proper error instead of silently no-oping
+- `$pullAll` on non-array field now throws proper error instead of silently no-oping
+- `$inc` on non-numeric field now throws `MongoCommandException` instead of `InvalidCastException`
+- `$mul` on non-numeric field now throws `MongoCommandException` instead of `InvalidCastException`
+
+### Added
+- 7 new integration tests covering array operator type validation, numeric operator type validation, and `$rename` edge cases
+
 ## [0.11.16] - 2026-05-11
 
 ### Fixed
