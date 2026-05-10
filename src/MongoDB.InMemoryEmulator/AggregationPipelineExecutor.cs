@@ -1150,13 +1150,23 @@ internal static class AggregationPipelineExecutor
                 switch (whenMatched)
                 {
                     case "replace":
-                        store.Replace(id, doc.DeepClone().AsBsonDocument);
+                        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/merge/
+                        //   "The _id field in the output collection is immutable."
+                        var replaceDoc = doc.DeepClone().AsBsonDocument;
+                        replaceDoc["_id"] = id;
+                        store.Replace(id, replaceDoc);
                         break;
                     case "keepExisting":
                         break; // do nothing
                     case "merge":
+                        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/merge/
+                        //   "The _id field in the output collection is immutable."
                         var merged = existing.DeepClone().AsBsonDocument;
-                        foreach (var el in doc) merged[el.Name] = el.Value;
+                        foreach (var el in doc)
+                        {
+                            if (el.Name == "_id") continue; // preserve existing _id
+                            merged[el.Name] = el.Value;
+                        }
                         store.Replace(id, merged);
                         break;
                     case "fail":
@@ -1612,39 +1622,77 @@ internal static class AggregationPipelineExecutor
         var outputSpec = spec["output"].AsBsonDocument;
         var sortBy = spec.Contains("sortBy") ? spec["sortBy"].AsBsonDocument : null;
 
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/fill/#std-label-fill-partitionby
+        //   "partitionBy: Specifies an expression to group the documents."
+        //   "partitionByFields: Specifies an array of fields as the compound key to group the documents."
+        BsonValue? partitionByExpr = null;
+        List<string>? partitionByFields = null;
+        if (spec.Contains("partitionBy"))
+            partitionByExpr = spec["partitionBy"];
+        else if (spec.Contains("partitionByFields"))
+            partitionByFields = spec["partitionByFields"].AsBsonArray.Select(v => v.AsString).ToList();
+
         var docs = input.ToList();
         if (sortBy != null)
             docs = BsonSortEvaluator.Apply(docs, sortBy).ToList();
 
-        var result = new List<BsonDocument>();
-        var lastValues = new Dictionary<string, BsonValue>();
-
-        foreach (var doc in docs)
+        // Group into partitions
+        IEnumerable<IGrouping<BsonValue, BsonDocument>> partitions;
+        if (partitionByExpr != null)
         {
-            var clone = doc.DeepClone().AsBsonDocument;
-            foreach (var field in outputSpec)
+            partitions = docs.GroupBy(
+                d => AggregationExpressionEvaluator.Evaluate(d, partitionByExpr),
+                BsonValueComparer.Instance);
+        }
+        else if (partitionByFields != null)
+        {
+            partitions = docs.GroupBy(d =>
             {
-                var fillSpec = field.Value.AsBsonDocument;
-                var val = BsonFilterEvaluator.ResolveFieldPath(clone, field.Name);
-                if (val == BsonNull.Value || !clone.Contains(field.Name))
+                var key = new BsonDocument();
+                foreach (var f in partitionByFields)
+                    key[f] = BsonFilterEvaluator.ResolveFieldPath(d, f);
+                return (BsonValue)key;
+            }, BsonValueComparer.Instance);
+        }
+        else
+        {
+            // No partitioning — all docs in one group
+            partitions = new[] { docs.GroupBy(_ => (BsonValue)BsonNull.Value, BsonValueComparer.Instance).First() };
+        }
+
+        var result = new List<BsonDocument>();
+
+        foreach (var partition in partitions)
+        {
+            var lastValues = new Dictionary<string, BsonValue>();
+
+            foreach (var doc in partition)
+            {
+                var clone = doc.DeepClone().AsBsonDocument;
+                foreach (var field in outputSpec)
                 {
-                    if (fillSpec.Contains("value"))
+                    var fillSpec = field.Value.AsBsonDocument;
+                    var val = BsonFilterEvaluator.ResolveFieldPath(clone, field.Name);
+                    if (val == BsonNull.Value || !clone.Contains(field.Name))
                     {
-                        clone[field.Name] = fillSpec["value"];
+                        if (fillSpec.Contains("value"))
+                        {
+                            clone[field.Name] = fillSpec["value"];
+                        }
+                        else if (fillSpec.Contains("method"))
+                        {
+                            var method = fillSpec["method"].AsString;
+                            if (method == "locf" && lastValues.ContainsKey(field.Name))
+                                clone[field.Name] = lastValues[field.Name];
+                        }
                     }
-                    else if (fillSpec.Contains("method"))
+                    else
                     {
-                        var method = fillSpec["method"].AsString;
-                        if (method == "locf" && lastValues.ContainsKey(field.Name))
-                            clone[field.Name] = lastValues[field.Name];
+                        lastValues[field.Name] = val;
                     }
                 }
-                else
-                {
-                    lastValues[field.Name] = val;
-                }
+                result.Add(clone);
             }
-            result.Add(clone);
         }
 
         return result;

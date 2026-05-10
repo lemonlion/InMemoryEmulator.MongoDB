@@ -1142,16 +1142,29 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                         break;
                 }
             }
+            // Ref: https://www.mongodb.com/docs/drivers/csharp/current/fundamentals/crud/write-operations/bulk-write/
+            //   "BulkWrite always throws MongoBulkWriteException on failure, for both ordered and unordered mode."
             catch (MongoWriteException ex) when (!isOrdered)
             {
                 // Ref: https://www.mongodb.com/docs/manual/reference/method/db.collection.bulkWrite/
                 //   "unordered operations that result in errors will still report the errors."
                 errors.Add(MongoErrors.CreateBulkWriteError(i, ServerErrorCategory.DuplicateKey, 11000, ex.Message));
             }
+            catch (Exception ex) when (isOrdered && ex is MongoWriteException or MongoCommandException)
+            {
+                // Ref: https://www.mongodb.com/docs/drivers/csharp/current/fundamentals/crud/write-operations/bulk-write/
+                //   "If an error occurs during an ordered bulk operation, the driver throws a
+                //    MongoBulkWriteException and does not execute the remaining operations."
+                errors.Add(MongoErrors.CreateBulkWriteError(i, ServerErrorCategory.DuplicateKey, 11000, ex.Message));
+                break; // ordered mode: stop at first error
+            }
         }
 
         if (errors.Count > 0)
         {
+            // Compute unprocessed requests (those after the last processed)
+            var unprocessed = requestList.Skip(processedRequests.Count).ToList();
+
             throw new MongoBulkWriteException<TDocument>(
                 MongoErrors.SyntheticConnectionId,
                 result: new BulkWriteResult<TDocument>.Acknowledged(
@@ -1164,7 +1177,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                     upserts: upserts),
                 writeErrors: errors,
                 writeConcernError: null,
-                unprocessedRequests: new List<WriteModel<TDocument>>());
+                unprocessedRequests: unprocessed);
         }
 
         return MongoErrors.CreateBulkWriteResult<TDocument>(

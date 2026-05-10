@@ -198,8 +198,9 @@ public class Round4BugFixTests : IAsyncLifetime
 
         await col.InsertOneAsync(new BsonDocument { { "email", "test@test.com" } });
 
-        // In ordered bulkwrite, the exception propagates as MongoWriteException
-        await Assert.ThrowsAnyAsync<MongoWriteException>(() =>
+        // Ref: https://www.mongodb.com/docs/drivers/csharp/current/fundamentals/crud/write-operations/bulk-write/
+        //   "BulkWrite always throws MongoBulkWriteException on failure."
+        await Assert.ThrowsAnyAsync<MongoBulkWriteException<BsonDocument>>(() =>
             col.BulkWriteAsync(new[]
             {
                 new InsertOneModel<BsonDocument>(new BsonDocument { { "email", "test@test.com" } })
