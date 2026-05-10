@@ -52,12 +52,16 @@ public class InMemoryMongoClient : IMongoClient
     public IAsyncCursor<BsonDocument> ListDatabases(ListDatabasesOptions? options, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var docs = _databases.Keys.Select(name => new BsonDocument
-        {
-            { "name", name },
-            { "sizeOnDisk", 0 },
-            { "empty", _databases[name].Stores.IsEmpty }
-        }).ToList();
+        // Ref: https://www.mongodb.com/docs/manual/reference/command/listDatabases/
+        //   "By default, listDatabases does not include empty databases."
+        var docs = _databases
+            .Where(kvp => !kvp.Value.Stores.IsEmpty)
+            .Select(kvp => new BsonDocument
+            {
+                { "name", kvp.Key },
+                { "sizeOnDisk", 0 },
+                { "empty", false }
+            }).ToList();
 
         return new InMemoryAsyncCursor<BsonDocument>(docs);
     }
@@ -86,7 +90,10 @@ public class InMemoryMongoClient : IMongoClient
     public IAsyncCursor<string> ListDatabaseNames(ListDatabaseNamesOptions? options, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return new InMemoryAsyncCursor<string>(_databases.Keys.ToList());
+        // Ref: https://www.mongodb.com/docs/manual/reference/command/listDatabases/
+        //   "By default, listDatabases does not include empty databases."
+        return new InMemoryAsyncCursor<string>(
+            _databases.Where(kvp => !kvp.Value.Stores.IsEmpty).Select(kvp => kvp.Key).ToList());
     }
 
     public IAsyncCursor<string> ListDatabaseNames(IClientSessionHandle session, CancellationToken cancellationToken = default)

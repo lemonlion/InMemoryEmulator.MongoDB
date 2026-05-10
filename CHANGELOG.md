@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.19] - 2026-05-11
+
+### Fixed
+- `Distinct` now includes `null` in results for missing fields, explicit null values, and null array elements — previously silently excluded all null values
+- `ListDatabases` and `ListDatabaseNames` now exclude empty databases (matching MongoDB default behavior) — previously included databases with no collections
+
+### Added
+- 6 new integration tests covering Distinct null/missing field handling, `$group` `$push` with missing values, and ListDatabaseNames empty database filtering
+
 ## [0.11.18] - 2026-05-11
 
 ### Fixed
