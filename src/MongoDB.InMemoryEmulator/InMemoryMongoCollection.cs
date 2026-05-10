@@ -151,9 +151,27 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
             {
                 errors.Add(MongoErrors.CreateBulkWriteError(i, ServerErrorCategory.DuplicateKey, 11000, ex.Message));
             }
-            catch when (isOrdered)
+            catch (MongoWriteException ex) when (isOrdered)
             {
-                throw;
+                // Ref: https://www.mongodb.com/docs/manual/reference/method/db.collection.insertMany/
+                //   "InsertMany errors are always wrapped in MongoBulkWriteException."
+                var writeErrors = new List<BulkWriteError>
+                {
+                    MongoErrors.CreateBulkWriteError(i, ServerErrorCategory.DuplicateKey, 11000, ex.Message)
+                };
+                throw new MongoBulkWriteException<TDocument>(
+                    MongoErrors.SyntheticConnectionId,
+                    result: new BulkWriteResult<TDocument>.Acknowledged(
+                        requestCount: docList.Count,
+                        matchedCount: 0,
+                        deletedCount: 0,
+                        insertedCount: i,
+                        modifiedCount: 0,
+                        processedRequests: docList.Take(i + 1).Select(d => (WriteModel<TDocument>)new InsertOneModel<TDocument>(d)).ToList(),
+                        upserts: new List<BulkWriteUpsert>()),
+                    writeErrors: writeErrors,
+                    writeConcernError: null,
+                    unprocessedRequests: docList.Skip(i + 1).Select(d => (WriteModel<TDocument>)new InsertOneModel<TDocument>(d)).ToList());
             }
         }
 

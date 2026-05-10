@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.33] - 2026-05-11
+
+### Fixed
+- `InsertMany` with ordered=true now wraps duplicate key errors in `MongoBulkWriteException` — previously threw raw `MongoWriteException`
+- `InsertMany` ordered error now includes `InsertedCount`, `WriteErrors[].Index`, and `UnprocessedRequests`
+
+### Added
+- 2 new integration tests covering `InsertMany` ordered exception type and `$addFields` nested document expressions
+
 ## [0.11.31] - 2026-05-11
 
 ### Fixed
