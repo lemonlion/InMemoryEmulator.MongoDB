@@ -483,10 +483,10 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         replacementBson["_id"] = targetId;
         _indexManager.ValidateDocument(replacementBson, excludeId: targetId);
         var beforeChange = target.DeepClone().AsBsonDocument;
-        var replaced = _store.Replace(targetId, replacementBson);
+        var (_, modified) = _store.Replace(targetId, replacementBson);
 
         PublishChangeEvent(ChangeStreamOperationType.Replace, replacementBson, beforeChange);
-        return new ReplaceOneResult.Acknowledged(1, replaced ? 1 : 0, null);
+        return new ReplaceOneResult.Acknowledged(1, modified ? 1 : 0, null);
     }
 
     [Obsolete("Use the overload with ReplaceOptions instead.")]
@@ -791,7 +791,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
 
         replacementBson["_id"] = targetId;
         _indexManager.ValidateDocument(replacementBson, excludeId: targetId);
-        _store.Replace(targetId, replacementBson);
+        var (_, wasModified) = _store.Replace(targetId, replacementBson);
         PublishChangeEvent(ChangeStreamOperationType.Replace, replacementBson, target);
 
         // Ref: https://www.mongodb.com/docs/manual/reference/command/findAndModify/
@@ -1482,8 +1482,9 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
     }
 
     /// <summary>
-    /// Creates a document for an upsert operation by extracting equality conditions
-    /// from the filter and applying the update operators.
+    /// Creates a base document for an upsert by extracting equality conditions from the filter.
+    /// The update operators are NOT applied here — the caller is responsible for applying them
+    /// via <see cref="ApplyUpdate"/> exactly once.
     /// </summary>
     /// <remarks>
     /// Ref: https://www.mongodb.com/docs/manual/reference/method/db.collection.update/#std-label-upsert-behavior
@@ -1492,12 +1493,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
     /// </remarks>
     private BsonDocument CreateUpsertDocument(FilterDefinition<TDocument> filter, BsonDocument updateBson)
     {
-        var doc = CreateUpsertDocumentFromFilter(filter);
-
-        // Apply the update (with isUpsertInsert=true so $setOnInsert is applied)
-        var result = BsonUpdateEvaluator.Apply(doc, updateBson, isUpsertInsert: true);
-        DocumentStore.EnsureId(result);
-        return result;
+        return CreateUpsertDocumentFromFilter(filter);
     }
 
     /// <summary>

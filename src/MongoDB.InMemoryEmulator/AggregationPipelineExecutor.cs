@@ -168,8 +168,11 @@ internal static class AggregationPipelineExecutor
                         // Simple numeric inclusion
                         if (el.Value.ToBoolean())
                         {
-                            var val = BsonFilterEvaluator.ResolveFieldPath(doc, el.Name);
-                            if (val != BsonNull.Value) SetFieldPath(result, el.Name, val);
+                            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/project/
+                            //   Inclusion projects the field if it exists, even when the value is null.
+                            //   Missing fields are omitted.
+                            if (BsonFilterEvaluator.FieldExists(doc, el.Name))
+                                SetFieldPath(result, el.Name, BsonFilterEvaluator.ResolveFieldPath(doc, el.Name));
                         }
                     }
                 }
@@ -184,8 +187,9 @@ internal static class AggregationPipelineExecutor
                 {
                     // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/project/
                     //   "You can use dot notation to include fields in embedded documents."
-                    var val = BsonFilterEvaluator.ResolveFieldPath(doc, el.Name);
-                    if (val != BsonNull.Value) SetFieldPath(result, el.Name, val);
+                    //   Includes the field if it exists, even when the value is null.
+                    if (BsonFilterEvaluator.FieldExists(doc, el.Name))
+                        SetFieldPath(result, el.Name, BsonFilterEvaluator.ResolveFieldPath(doc, el.Name));
                 }
             }
         }
@@ -674,10 +678,16 @@ internal static class AggregationPipelineExecutor
                     .Where(f =>
                     {
                         var fVal = BsonFilterEvaluator.ResolveFieldPath(f, foreignField);
-                        if (localValue is BsonArray localArr)
-                            return localArr.Contains(fVal);
-                        if (fVal is BsonArray foreignArr)
-                            return foreignArr.Contains(localValue);
+                        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/lookup/
+                        //   Array-to-array: match if any element is shared between the two arrays.
+                        //   Array-to-scalar: match if the scalar is an element of the array.
+                        //   Scalar-to-scalar: match if the values are equal.
+                        if (localValue is BsonArray localArr && fVal is BsonArray foreignArr)
+                            return localArr.Any(lv => foreignArr.Any(fv => BsonValueComparer.Instance.Equals(lv, fv)));
+                        if (localValue is BsonArray localArr2)
+                            return localArr2.Contains(fVal);
+                        if (fVal is BsonArray foreignArr2)
+                            return foreignArr2.Contains(localValue);
                         return BsonValueComparer.Instance.Equals(fVal, localValue);
                     })
                     .Select(f => f.DeepClone().AsBsonDocument)

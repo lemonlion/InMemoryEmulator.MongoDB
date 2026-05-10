@@ -148,14 +148,15 @@ internal class DocumentStore
     }
 
     /// <summary>
-    /// Replaces a document by _id. Returns true if a document was replaced.
+    /// Replaces a document by _id. Returns (found, modified).
     /// </summary>
     /// <remarks>
     /// Ref: https://www.mongodb.com/docs/manual/reference/command/update/
     ///   "If the update parameter contains only field:value expressions, then update replaces
     ///    the matching document with the update document."
+    ///   "nModified is 0 when the replacement document is the same as the document it replaced."
     /// </remarks>
-    internal bool Replace(BsonValue id, BsonDocument replacement)
+    internal (bool Found, bool Modified) Replace(BsonValue id, BsonDocument replacement)
     {
         ValidateDocumentSize(replacement);
         var docLock = _docLocks.GetOrAdd(id, _ => new SemaphoreSlim(1, 1));
@@ -163,7 +164,7 @@ internal class DocumentStore
         try
         {
             if (!_documents.TryGetValue(id, out var existing))
-                return false;
+                return (false, false);
 
             var before = existing.DeepClone().AsBsonDocument;
             var newDoc = replacement.DeepClone().AsBsonDocument;
@@ -172,10 +173,11 @@ internal class DocumentStore
             if (!newDoc.Contains("_id"))
                 newDoc.InsertAt(0, new BsonElement("_id", id));
 
+            bool modified = !existing.Equals(newDoc);
             _documents[id] = newDoc;
             _versions.AddOrUpdate(id, 1, (_, v) => v + 1);
             RecordChange(DocumentChangeType.Replace, id, newDoc.DeepClone().AsBsonDocument, before, null);
-            return true;
+            return (true, modified);
         }
         finally
         {
