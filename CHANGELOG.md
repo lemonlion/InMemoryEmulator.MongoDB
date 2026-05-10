@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.26] - 2026-05-11
+
+### Fixed
+- `$sortArray` on non-array input now throws proper `MongoCommandException` — previously threw `InvalidCastException`
+- `$toObjectId` on non-string input now throws proper `MongoCommandException` — previously threw `InvalidCastException`
+- `$toObjectId` with invalid ObjectId string now throws proper `MongoCommandException` — previously threw unhandled `FormatException`
+- `$split` on non-string arguments now throws proper `MongoCommandException` — previously threw `InvalidCastException`
+- `$dateFromString` on non-string `dateString` now throws proper `MongoCommandException` — previously threw `InvalidCastException`
+- `$trim`/`$ltrim`/`$rtrim` with `null` chars parameter now correctly returns `null` — previously threw `InvalidCastException`
+
+### Added
+- 5 new integration tests covering `$sortArray`/`$toObjectId`/`$split`/`$dateFromString` type validation and `$trim` null chars handling
+
 ## [0.11.25] - 2026-05-11
 
 ### Fixed

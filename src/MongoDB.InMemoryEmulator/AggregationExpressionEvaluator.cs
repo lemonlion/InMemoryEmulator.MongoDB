@@ -483,7 +483,11 @@ internal static class AggregationExpressionEvaluator
                 //   "$ltrim removes characters from the beginning of a string."
                 // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/rtrim/
                 //   "$rtrim removes characters from the end of a string."
-                var chars = Evaluate(doc, spec["chars"], variables).AsString.ToCharArray();
+                // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/trim/
+                //   "If chars resolves to null, $trim returns null."
+                var charsVal = Evaluate(doc, spec["chars"], variables);
+                if (charsVal == BsonNull.Value) return BsonNull.Value;
+                var chars = charsVal.AsString.ToCharArray();
                 return new BsonString(fnWithChars(str, chars));
             }
             return new BsonString(fn(str));
@@ -542,6 +546,11 @@ internal static class AggregationExpressionEvaluator
         // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/split/
         //   "Returns null if either argument is null."
         if (arr[0] == BsonNull.Value || arr[1] == BsonNull.Value) return BsonNull.Value;
+        //   "Both arguments must be strings."
+        if (!arr[0].IsString)
+            throw MongoErrors.BadValue($"$split requires a string as the first argument, found: {arr[0].BsonType}");
+        if (!arr[1].IsString)
+            throw MongoErrors.BadValue($"$split requires a string as the second argument, found: {arr[1].BsonType}");
         var parts = arr[0].AsString.Split(arr[1].AsString);
         return new BsonArray(parts.Select(p => new BsonString(p)));
     }
@@ -933,6 +942,10 @@ internal static class AggregationExpressionEvaluator
         var spec = args.AsBsonDocument;
         var input = Evaluate(doc, spec["input"], variables);
         if (input == BsonNull.Value) return BsonNull.Value;
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/sortArray/
+        //   "input must resolve to an array"
+        if (!input.IsBsonArray)
+            throw MongoErrors.BadValue($"$sortArray's input must be an array, not {input.BsonType}");
         var sortBy = spec["sortBy"];
         if (sortBy.IsBsonDocument)
         {
@@ -1146,7 +1159,18 @@ internal static class AggregationExpressionEvaluator
     {
         var val = Evaluate(doc, args is BsonArray a ? a[0] : args, variables);
         if (val == BsonNull.Value) return BsonNull.Value;
-        return new BsonObjectId(ObjectId.Parse(val.AsString));
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/toObjectId/
+        //   "$toObjectId requires a string argument"
+        if (!val.IsString)
+            throw MongoErrors.BadValue($"$toObjectId requires a string argument, found: {val.BsonType}");
+        try
+        {
+            return new BsonObjectId(ObjectId.Parse(val.AsString));
+        }
+        catch (FormatException)
+        {
+            throw MongoErrors.BadValue($"$toObjectId: '{val.AsString}' is not a valid ObjectId");
+        }
     }
 
     private static BsonValue EvalIsNumber(BsonDocument doc, BsonValue args, BsonDocument? variables)
@@ -1193,6 +1217,10 @@ internal static class AggregationExpressionEvaluator
         var spec = args.AsBsonDocument;
         var dateString = Evaluate(doc, spec["dateString"], variables);
         if (dateString == BsonNull.Value) return spec.Contains("onNull") ? Evaluate(doc, spec["onNull"], variables) : BsonNull.Value;
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/dateFromString/
+        //   "dateString must be a string"
+        if (!dateString.IsString)
+            throw MongoErrors.BadValue($"$dateFromString requires a string as 'dateString', found: {dateString.BsonType}");
         try
         {
             var dt = DateTime.Parse(dateString.AsString, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
