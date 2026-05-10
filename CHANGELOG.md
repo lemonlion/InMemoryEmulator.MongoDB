@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.27] - 2026-05-11
+
+### Fixed
+- `$range` with step=0 now throws proper `MongoCommandException` — previously caused infinite loop
+- `$round` with null input now returns null — previously threw `InvalidCastException`
+- `$trunc` with null input now returns null — previously threw `InvalidCastException`
+- `$indexOfBytes` with start index beyond string length now returns -1 — previously threw `ArgumentOutOfRangeException`
+- `$indexOfBytes` with null substring now throws proper `MongoCommandException` — previously incorrectly returned null
+- `$zip` with null input arrays now returns null — previously threw `InvalidCastException`
+- `$mergeObjects` with non-document input now throws proper `MongoCommandException` — previously threw `InvalidCastException`
+
+### Added
+- 7 new integration tests covering `$range`/`$round`/`$trunc`/`$indexOfBytes`/`$zip`/`$mergeObjects` edge cases
+
 ## [0.11.26] - 2026-05-11
 
 ### Fixed

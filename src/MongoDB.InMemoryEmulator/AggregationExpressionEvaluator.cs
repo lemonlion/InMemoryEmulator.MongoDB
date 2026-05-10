@@ -416,9 +416,11 @@ internal static class AggregationExpressionEvaluator
     private static BsonValue EvalRound(BsonDocument doc, BsonValue args, BsonDocument? variables)
     {
         var arr = EvalArray(doc, args, variables);
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/round/
+        //   "If the argument resolves to a value of null or refers to a missing field, $round returns null."
+        if (arr[0] == BsonNull.Value) return BsonNull.Value;
         var val = arr[0].ToDouble();
         int places = arr.Count > 1 ? arr[1].ToInt32() : 0;
-        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/round/
         //   "Rounds using the IEEE 754 round-to-even rule."
         return new BsonDouble(Math.Round(val, places, MidpointRounding.ToEven));
     }
@@ -426,6 +428,9 @@ internal static class AggregationExpressionEvaluator
     private static BsonValue EvalTrunc(BsonDocument doc, BsonValue args, BsonDocument? variables)
     {
         var arr = EvalArray(doc, args, variables);
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/trunc/
+        //   "If the argument resolves to a value of null or refers to a missing field, $trunc returns null."
+        if (arr[0] == BsonNull.Value) return BsonNull.Value;
         var val = arr[0].ToDouble();
         int places = arr.Count > 1 ? arr[1].ToInt32() : 0;
         double factor = Math.Pow(10, places);
@@ -531,12 +536,19 @@ internal static class AggregationExpressionEvaluator
         if (arr[0] == BsonNull.Value) return BsonNull.Value;
         // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/indexOfBytes/
         //   "Returns null if the first argument is null or missing."
-        if (arr[1] == BsonNull.Value) return BsonNull.Value;
+        //   "<substring expression> can be any valid expression as long as it resolves to a string."
+        if (arr[1] == BsonNull.Value)
+            throw MongoErrors.BadValue("$indexOfBytes requires a string as the second argument, found: null");
         var str = arr[0].AsString;
         var sub = arr[1].AsString;
         int start = arr.Count > 2 ? arr[2].ToInt32() : 0;
         int end = arr.Count > 3 ? arr[3].ToInt32() : str.Length;
-        var idx = str.IndexOf(sub, start, Math.Min(end - start, str.Length - start), StringComparison.Ordinal);
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/indexOfBytes/
+        //   Returns -1 when start > string length (e.g. { $indexOfBytes: ["vanilla", "ll", 12] } → -1)
+        if (start < 0 || start >= str.Length) return new BsonInt32(-1);
+        end = Math.Min(end, str.Length);
+        if (end <= start) return new BsonInt32(-1);
+        var idx = str.IndexOf(sub, start, end - start, StringComparison.Ordinal);
         return new BsonInt32(idx);
     }
 
@@ -896,6 +908,10 @@ internal static class AggregationExpressionEvaluator
         int start = arr[0].ToInt32();
         int end = arr[1].ToInt32();
         int step = arr.Count > 2 ? arr[2].ToInt32() : 1;
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/range/
+        //   "A non-zero step value."
+        if (step == 0)
+            throw MongoErrors.BadValue("$range requires a non-zero step value");
         var result = new BsonArray();
         for (int i = start; step > 0 ? i < end : i > end; i += step)
             result.Add(new BsonInt32(i));
@@ -997,7 +1013,17 @@ internal static class AggregationExpressionEvaluator
     private static BsonValue EvalZip(BsonDocument doc, BsonValue args, BsonDocument? variables)
     {
         var spec = args.AsBsonDocument;
-        var inputs = spec["inputs"].AsBsonArray.Select(i => Evaluate(doc, i, variables).AsBsonArray).ToList();
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/zip/
+        //   "If any of the inputs arrays resolves to a value of null or refers to a
+        //    missing field, $zip returns null."
+        var evaluatedInputs = spec["inputs"].AsBsonArray.Select(i => Evaluate(doc, i, variables)).ToList();
+        if (evaluatedInputs.Any(v => v == BsonNull.Value)) return BsonNull.Value;
+        var inputs = evaluatedInputs.Select(v =>
+        {
+            if (!v.IsBsonArray)
+                throw MongoErrors.BadValue($"$zip requires array inputs, found: {v.BsonType}");
+            return v.AsBsonArray;
+        }).ToList();
         var useLongestLength = spec.GetValue("useLongestLength", false).AsBoolean;
         var defaults = spec.Contains("defaults") ? spec["defaults"].AsBsonArray : null;
 
@@ -1301,6 +1327,9 @@ internal static class AggregationExpressionEvaluator
         foreach (var v in arr)
         {
             if (v == BsonNull.Value) continue;
+            //   "$mergeObjects requires object inputs"
+            if (!v.IsBsonDocument)
+                throw MongoErrors.BadValue($"$mergeObjects requires object inputs, but received: {v.BsonType}");
             foreach (var el in v.AsBsonDocument)
                 result[el.Name] = el.Value;
         }
