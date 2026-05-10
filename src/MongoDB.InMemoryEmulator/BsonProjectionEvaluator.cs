@@ -24,6 +24,7 @@ internal static class BsonProjectionEvaluator
         if (projection == null || projection.ElementCount == 0)
             return doc;
 
+        ValidateProjectionMode(projection);
         var mode = DetermineMode(projection);
 
         if (mode == ProjectionMode.Inclusion)
@@ -36,6 +37,40 @@ internal static class BsonProjectionEvaluator
     {
         Inclusion,
         Exclusion
+    }
+
+    /// <summary>
+    /// Validates that a projection does not mix inclusion and exclusion (except _id).
+    /// </summary>
+    /// <remarks>
+    /// Ref: https://www.mongodb.com/docs/manual/reference/method/db.collection.find/#std-label-find-projection
+    ///   "You cannot combine inclusion and exclusion statements, with the exception of the _id field."
+    /// </remarks>
+    private static void ValidateProjectionMode(BsonDocument projection)
+    {
+        bool? isInclusion = null;
+        foreach (var element in projection)
+        {
+            if (element.Name == "_id") continue;
+
+            bool elementIsInclusion;
+            if (element.Value.IsBsonDocument)
+            {
+                // Projection operators ($elemMatch, $slice, $meta) are inclusion
+                elementIsInclusion = true;
+            }
+            else
+            {
+                var val = element.Value.IsNumeric ? element.Value.ToInt32() : (element.Value.AsBoolean ? 1 : 0);
+                elementIsInclusion = val == 1;
+            }
+
+            if (isInclusion == null)
+                isInclusion = elementIsInclusion;
+            else if (isInclusion != elementIsInclusion)
+                throw MongoErrors.BadValue(
+                    $"Cannot do {(elementIsInclusion ? "inclusion" : "exclusion")} on field {element.Name} in {(isInclusion.Value ? "inclusion" : "exclusion")} projection");
+        }
     }
 
     /// <summary>

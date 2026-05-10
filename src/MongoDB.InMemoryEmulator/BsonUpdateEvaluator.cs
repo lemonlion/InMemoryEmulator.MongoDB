@@ -648,6 +648,10 @@ internal static class BsonUpdateEvaluator
             }
 
             var current = ResolveFieldPath(doc, element.Name);
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/bit/
+            //   "$bit requires the field to hold a numeric value (Int32 or Int64)."
+            if (current != BsonNull.Value && !current.IsInt32 && !current.IsInt64)
+                throw MongoErrors.BadValue($"Cannot apply $bit to a value of non-numeric type {current.BsonType}");
             long currentVal = current.IsInt64 ? current.AsInt64 : current.IsInt32 ? current.AsInt32 : 0;
 
             var bitOps = element.Value.AsBsonDocument;

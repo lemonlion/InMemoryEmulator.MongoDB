@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.18] - 2026-05-11
+
+### Fixed
+- Projection now validates against mixing inclusion and exclusion modes (except `_id`) — previously silently produced incorrect results
+- `$bit` on non-numeric field now throws proper error instead of silently replacing with integer result
+
+### Added
+- 7 new integration tests covering projection mode validation, `$bit` non-numeric error, `$inc`/`$mul` on missing fields, `$addToSet`/`$push` on non-array fields
+
 ## [0.11.17] - 2026-05-11
 
 ### Fixed
