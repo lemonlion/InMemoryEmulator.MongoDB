@@ -171,8 +171,19 @@ internal static class AggregationPipelineExecutor
                             // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/project/
                             //   Inclusion projects the field if it exists, even when the value is null.
                             //   Missing fields are omitted.
-                            if (BsonFilterEvaluator.FieldExists(doc, el.Name))
-                                SetFieldPath(result, el.Name, BsonFilterEvaluator.ResolveFieldPath(doc, el.Name));
+                            if (ProjectionFieldExists(doc, el.Name))
+                            {
+                                if (el.Name.Contains('.'))
+                                {
+                                    // Dot-notation into arrays: use projection-aware resolution
+                                    var parts = el.Name.Split('.');
+                                    ProjectInclusionPath(doc, result, parts, 0);
+                                }
+                                else
+                                {
+                                    SetFieldPath(result, el.Name, BsonFilterEvaluator.ResolveFieldPath(doc, el.Name));
+                                }
+                            }
                         }
                     }
                 }
@@ -188,8 +199,18 @@ internal static class AggregationPipelineExecutor
                     // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/project/
                     //   "You can use dot notation to include fields in embedded documents."
                     //   Includes the field if it exists, even when the value is null.
-                    if (BsonFilterEvaluator.FieldExists(doc, el.Name))
-                        SetFieldPath(result, el.Name, BsonFilterEvaluator.ResolveFieldPath(doc, el.Name));
+                    if (ProjectionFieldExists(doc, el.Name))
+                    {
+                        if (el.Name.Contains('.'))
+                        {
+                            var parts = el.Name.Split('.');
+                            ProjectInclusionPath(doc, result, parts, 0);
+                        }
+                        else
+                        {
+                            SetFieldPath(result, el.Name, BsonFilterEvaluator.ResolveFieldPath(doc, el.Name));
+                        }
+                    }
                 }
             }
         }
@@ -1948,6 +1969,134 @@ internal static class AggregationPipelineExecutor
             current = current[parts[i]].AsBsonDocument;
         }
         current[parts[^1]] = value;
+    }
+
+    /// <summary>
+    /// Checks if a dot-notation field path exists in a document, traversing arrays.
+    /// Used by $project inclusion to handle "arr.field" style paths.
+    /// </summary>
+    /// <remarks>
+    /// Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/project/
+    ///   "You can use dot notation to include fields in embedded documents."
+    ///   When the path traverses an array, the sub-field is projected from each array element.
+    /// </remarks>
+    private static bool ProjectionFieldExists(BsonDocument doc, string path)
+    {
+        var parts = path.Split('.');
+        return ProjectionFieldExistsRecursive(doc, parts, 0);
+    }
+
+    private static bool ProjectionFieldExistsRecursive(BsonValue current, string[] parts, int index)
+    {
+        if (index >= parts.Length)
+            return true;
+
+        if (current is BsonDocument nested)
+        {
+            if (!nested.Contains(parts[index]))
+                return false;
+            return ProjectionFieldExistsRecursive(nested[parts[index]], parts, index + 1);
+        }
+
+        if (current is BsonArray array)
+        {
+            // Array traversal: check if any element has the remaining path
+            return array.Any(elem => ProjectionFieldExistsRecursive(elem, parts, index));
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Resolves a dot-notation field path for projection, traversing arrays.
+    /// When the path traverses an array, returns a projected array with only the specified sub-field.
+    /// </summary>
+    private static BsonValue ResolveProjectionFieldPath(BsonDocument doc, string path)
+    {
+        var parts = path.Split('.');
+        return ResolveProjectionFieldPathRecursive(doc, parts, 0);
+    }
+
+    private static BsonValue ResolveProjectionFieldPathRecursive(BsonValue current, string[] parts, int index)
+    {
+        if (index >= parts.Length)
+            return current;
+
+        if (current is BsonDocument nested)
+        {
+            if (!nested.Contains(parts[index]))
+                return BsonNull.Value;
+            return ResolveProjectionFieldPathRecursive(nested[parts[index]], parts, index + 1);
+        }
+
+        if (current is BsonArray array)
+        {
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/project/
+            //   When a dot-notation path traverses an array, the sub-field is projected from each element.
+            var resultArray = new BsonArray();
+            var remainingParts = parts.Skip(index).ToArray();
+            foreach (var elem in array)
+            {
+                if (elem is BsonDocument elemDoc)
+                {
+                    var projected = new BsonDocument();
+                    ProjectInclusionPath(elemDoc, projected, remainingParts, 0);
+                    resultArray.Add(projected);
+                }
+                else
+                {
+                    resultArray.Add(elem);
+                }
+            }
+            return resultArray;
+        }
+
+        return BsonNull.Value;
+    }
+
+    /// <summary>
+    /// Projects a single dot-notation inclusion path from a document into a target document.
+    /// </summary>
+    private static void ProjectInclusionPath(BsonDocument source, BsonDocument target, string[] parts, int index)
+    {
+        if (index >= parts.Length)
+            return;
+
+        var part = parts[index];
+        if (!source.Contains(part))
+            return;
+
+        if (index == parts.Length - 1)
+        {
+            target[part] = source[part];
+            return;
+        }
+
+        var value = source[part];
+        if (value.IsBsonDocument)
+        {
+            if (!target.Contains(part) || !target[part].IsBsonDocument)
+                target[part] = new BsonDocument();
+            ProjectInclusionPath(value.AsBsonDocument, target[part].AsBsonDocument, parts, index + 1);
+        }
+        else if (value.IsBsonArray)
+        {
+            var targetArray = new BsonArray();
+            foreach (var elem in value.AsBsonArray)
+            {
+                if (elem.IsBsonDocument)
+                {
+                    var projectedElem = new BsonDocument();
+                    ProjectInclusionPath(elem.AsBsonDocument, projectedElem, parts, index + 1);
+                    targetArray.Add(projectedElem);
+                }
+                else
+                {
+                    targetArray.Add(elem);
+                }
+            }
+            target[part] = targetArray;
+        }
     }
 
     #endregion

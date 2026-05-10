@@ -63,12 +63,14 @@ public class InMemoryGridFSBucket
         var metadata = options?.Metadata;
 
         // Write chunks
+        // Ref: https://www.mongodb.com/docs/manual/core/gridfs/#gridfs-chunks
+        //   "For files with length zero, there are no documents in the chunks collection."
         var n = 0;
-        for (int offset = 0; offset < data.Length || n == 0; offset += chunkSize)
+        for (int offset = 0; offset < data.Length; offset += chunkSize)
         {
             var remaining = Math.Min(chunkSize, data.Length - offset);
-            var chunkData = remaining > 0 ? new byte[remaining] : Array.Empty<byte>();
-            if (remaining > 0) Array.Copy(data, offset, chunkData, 0, remaining);
+            var chunkData = new byte[remaining];
+            Array.Copy(data, offset, chunkData, 0, remaining);
 
             ChunksCollection.InsertOne(new BsonDocument
             {
@@ -78,7 +80,6 @@ public class InMemoryGridFSBucket
                 { "data", new BsonBinaryData(chunkData) }
             });
             n++;
-            if (remaining <= 0) break;
         }
 
         // Write file document

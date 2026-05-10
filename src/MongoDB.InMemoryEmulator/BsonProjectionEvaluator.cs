@@ -193,23 +193,56 @@ internal static class BsonProjectionEvaluator
 
     /// <summary>
     /// Removes a nested field specified by dot-notation path.
+    /// Handles arrays: when a path segment refers to an array, the field is removed
+    /// from each element of the array.
     /// </summary>
+    /// <remarks>
+    /// Ref: https://www.mongodb.com/docs/manual/tutorial/project-fields-from-query-results/
+    ///   "You can use dot notation to suppress fields in embedded documents."
+    ///   When exclusion path traverses an array, the field is removed from each array element.
+    /// </remarks>
     private static void RemoveNestedField(BsonDocument doc, string dotPath)
     {
         var parts = dotPath.Split('.');
-        var current = doc;
-        for (int i = 0; i < parts.Length - 1; i++)
+        RemoveNestedFieldRecursive(doc, parts, 0);
+    }
+
+    private static void RemoveNestedFieldRecursive(BsonDocument doc, string[] parts, int index)
+    {
+        if (index == parts.Length - 1)
         {
-            if (!current.Contains(parts[i]) || !current[parts[i]].IsBsonDocument)
-                return;
-            current = current[parts[i]].AsBsonDocument;
+            doc.Remove(parts[index]);
+            return;
         }
-        current.Remove(parts[^1]);
+
+        var part = parts[index];
+        if (!doc.Contains(part))
+            return;
+
+        var value = doc[part];
+        if (value.IsBsonDocument)
+        {
+            RemoveNestedFieldRecursive(value.AsBsonDocument, parts, index + 1);
+        }
+        else if (value.IsBsonArray)
+        {
+            foreach (var elem in value.AsBsonArray)
+            {
+                if (elem.IsBsonDocument)
+                    RemoveNestedFieldRecursive(elem.AsBsonDocument, parts, index + 1);
+            }
+        }
     }
 
     /// <summary>
     /// Copies a field (including dot-notation nested paths) from source to target.
+    /// Handles arrays: when a path segment refers to an array, the remaining path
+    /// is projected from each element of the array.
     /// </summary>
+    /// <remarks>
+    /// Ref: https://www.mongodb.com/docs/manual/tutorial/project-fields-from-query-results/
+    ///   "You can use dot notation to project specific fields inside documents embedded in an array."
+    /// </remarks>
     private static void CopyField(BsonDocument source, BsonDocument target, string fieldPath)
     {
         if (!fieldPath.Contains('.'))
@@ -221,24 +254,53 @@ internal static class BsonProjectionEvaluator
 
         // Dot notation: "address.city" → copy nested path
         var parts = fieldPath.Split('.');
-        var current = source;
-        var targetCurrent = target;
+        CopyFieldRecursive(source, target, parts, 0);
+    }
 
-        for (int i = 0; i < parts.Length - 1; i++)
+    private static void CopyFieldRecursive(BsonDocument source, BsonDocument target, string[] parts, int index)
+    {
+        if (index == parts.Length - 1)
         {
-            if (!current.Contains(parts[i]) || !current[parts[i]].IsBsonDocument)
-                return;
-
-            if (!targetCurrent.Contains(parts[i]) || !targetCurrent[parts[i]].IsBsonDocument)
-                targetCurrent[parts[i]] = new BsonDocument();
-
-            current = current[parts[i]].AsBsonDocument;
-            targetCurrent = targetCurrent[parts[i]].AsBsonDocument;
+            // Last part: copy the value
+            var lastPart = parts[index];
+            if (source.Contains(lastPart))
+                target[lastPart] = source[lastPart];
+            return;
         }
 
-        var lastPart = parts[^1];
-        if (current.Contains(lastPart))
-            targetCurrent[lastPart] = current[lastPart];
+        var part = parts[index];
+        if (!source.Contains(part))
+            return;
+
+        var value = source[part];
+        if (value.IsBsonDocument)
+        {
+            if (!target.Contains(part) || !target[part].IsBsonDocument)
+                target[part] = new BsonDocument();
+            CopyFieldRecursive(value.AsBsonDocument, target[part].AsBsonDocument, parts, index + 1);
+        }
+        else if (value.IsBsonArray)
+        {
+            // Ref: https://www.mongodb.com/docs/manual/tutorial/project-fields-from-query-results/
+            //   When a dot-notation path traverses an array, the projection applies to each element.
+            var sourceArray = value.AsBsonArray;
+            var targetArray = new BsonArray();
+            var remainingParts = parts.Skip(index + 1).ToArray();
+            foreach (var elem in sourceArray)
+            {
+                if (elem.IsBsonDocument)
+                {
+                    var projectedElem = new BsonDocument();
+                    CopyFieldRecursive(elem.AsBsonDocument, projectedElem, remainingParts, 0);
+                    targetArray.Add(projectedElem);
+                }
+                else
+                {
+                    targetArray.Add(elem);
+                }
+            }
+            target[part] = targetArray;
+        }
     }
 
     /// <summary>
