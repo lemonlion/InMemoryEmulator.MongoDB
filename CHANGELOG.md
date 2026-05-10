@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.28] - 2026-05-11
+
+### Fixed
+- `$inc` on a field with `null` value now throws proper error — previously silently treated null as 0
+- `$mul` on a field with `null` value now throws proper error — previously silently treated null as 0
+- `$rename` on a field with `null` value now correctly renames it — previously treated null as missing and did nothing
+- `$min` on a field with `null` value now correctly keeps null (null < numbers in BSON comparison order) — previously always replaced null with the new value
+- `$all` filter operator now matches scalar field values — previously only matched arrays
+
+### Added
+- 5 new integration tests covering `$inc`/`$mul`/`$rename`/`$min` null-value handling and `$all` scalar matching
+
 ## [0.11.27] - 2026-05-11
 
 ### Fixed

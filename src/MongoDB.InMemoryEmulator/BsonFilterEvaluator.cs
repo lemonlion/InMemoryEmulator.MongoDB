@@ -182,12 +182,15 @@ internal static class BsonFilterEvaluator
             // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/all/
             //   "Use $all with $elemMatch to match documents where the array field contains
             //    at least one element that matches each $elemMatch condition."
-            "$all" => fieldExists && fieldValue is BsonArray allArr &&
-                      operand.AsBsonArray.All(required =>
+            //   "{ tags: { $all: ['ssl'] } } is equivalent to { $and: [ { tags: 'ssl' } ] }"
+            //   This means $all also matches scalar values (since { tags: 'ssl' } matches scalars).
+            "$all" => fieldExists && operand.AsBsonArray.All(required =>
                       {
                           if (required is BsonDocument reqDoc && reqDoc.ElementCount == 1 && reqDoc.GetElement(0).Name == "$elemMatch")
                               return MatchesElemMatch(fieldValue, reqDoc["$elemMatch"].AsBsonDocument);
-                          return allArr.Any(el => el.Equals(required));
+                          if (fieldValue is BsonArray allArr)
+                              return allArr.Any(el => el.Equals(required));
+                          return fieldValue.Equals(required);
                       }),
 
             // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/elemMatch/
@@ -413,7 +416,7 @@ internal static class BsonFilterEvaluator
         return current;
     }
 
-    private static bool FieldExists(BsonDocument doc, string path)
+    internal static bool FieldExists(BsonDocument doc, string path)
     {
         var parts = path.Split('.');
         BsonValue current = doc;

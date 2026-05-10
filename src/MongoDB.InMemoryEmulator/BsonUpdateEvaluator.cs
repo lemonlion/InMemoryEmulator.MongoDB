@@ -161,7 +161,11 @@ internal static class BsonUpdateEvaluator
             }
             else
             {
-                var current = ResolveFieldPath(doc, element.Name);
+                // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/inc/
+                //   If the field does not exist, $inc creates the field and sets it to the specified value.
+                //   But if the field exists with a null value, it should throw.
+                var fieldExists = BsonFilterEvaluator.FieldExists(doc, element.Name);
+                var current = fieldExists ? ResolveFieldPath(doc, element.Name) : new BsonInt32(0);
                 var newValue = AddBsonValues(current, element.Value);
                 SetFieldPath(doc, element.Name, newValue);
             }
@@ -184,8 +188,13 @@ internal static class BsonUpdateEvaluator
             }
             else
             {
-                var current = ResolveFieldPath(doc, element.Name);
-                if (current == BsonNull.Value) current = new BsonInt32(0);
+                // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/mul/
+                //   If the field does not exist, $mul creates the field and sets it to 0.
+                //   But if the field exists with a null value, it should throw.
+                var fieldExists = BsonFilterEvaluator.FieldExists(doc, element.Name);
+                var current = fieldExists ? ResolveFieldPath(doc, element.Name) : new BsonInt32(0);
+                if (current == BsonNull.Value)
+                    throw MongoErrors.BadValue($"Cannot apply $mul to a value of non-numeric type null");
                 var newValue = MultiplyBsonValues(current, element.Value);
                 SetFieldPath(doc, element.Name, newValue);
             }
@@ -203,16 +212,32 @@ internal static class BsonUpdateEvaluator
             {
                 ApplyPositionalAction(doc, element.Name, ctx, (d, leaf) =>
                 {
-                    var current = d.Contains(leaf) ? d[leaf] : BsonNull.Value;
-                    if (current == BsonNull.Value || BsonValueComparer.Instance.Compare(element.Value, current) < 0)
+                    if (!d.Contains(leaf))
+                    {
+                        d[leaf] = element.Value;
+                        return;
+                    }
+                    var current = d[leaf];
+                    if (BsonValueComparer.Instance.Compare(element.Value, current) < 0)
                         d[leaf] = element.Value;
                 });
             }
             else
             {
-                var current = ResolveFieldPath(doc, element.Name);
-                if (current == BsonNull.Value || BsonValueComparer.Instance.Compare(element.Value, current) < 0)
+                // Ref: https://www.mongodb.com/docs/manual/reference/bson-type-comparison-order/
+                //   "MinKey < Null < Numbers" — so $min with a number on a null field is no-op.
+                //   But if the field is missing, always set the value.
+                var fieldExists = BsonFilterEvaluator.FieldExists(doc, element.Name);
+                if (!fieldExists)
+                {
                     SetFieldPath(doc, element.Name, element.Value);
+                }
+                else
+                {
+                    var current = ResolveFieldPath(doc, element.Name);
+                    if (BsonValueComparer.Instance.Compare(element.Value, current) < 0)
+                        SetFieldPath(doc, element.Name, element.Value);
+                }
             }
         }
     }
@@ -244,15 +269,17 @@ internal static class BsonUpdateEvaluator
 
     // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/rename/
     //   "Renames a field."
+    //   "$rename does nothing if the field does not exist."
+    //   But a field that exists with a null value should be renamed.
     private static void ApplyRename(BsonDocument doc, BsonDocument fields)
     {
         foreach (var element in fields)
         {
             var oldName = element.Name;
             var newName = element.Value.AsString;
-            var value = ResolveFieldPath(doc, oldName);
-            if (value != BsonNull.Value)
+            if (BsonFilterEvaluator.FieldExists(doc, oldName))
             {
+                var value = ResolveFieldPath(doc, oldName);
                 RemoveFieldPath(doc, oldName);
                 SetFieldPath(doc, newName, value);
             }
@@ -819,10 +846,11 @@ internal static class BsonUpdateEvaluator
 
     private static BsonValue AddBsonValues(BsonValue a, BsonValue b)
     {
-        if (a == BsonNull.Value) a = new BsonInt32(0);
-
         // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/inc/
         //   "Cannot apply $inc to a value of non-numeric type."
+        if (a == BsonNull.Value)
+            throw MongoErrors.BadValue($"Cannot apply $inc to a value of non-numeric type null");
+
         if (!a.IsNumeric)
             throw MongoErrors.BadValue($"Cannot apply $inc to a value of non-numeric type {a.BsonType}");
 
