@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.45] - 2025-07-11
+
+### Fixed
+- `$inc`/`$mul` type precedence corrected: Decimal128 now takes precedence over Double (was returning Double when mixing Decimal128+Double)
+- `ReplaceOne` and `FindOneAndReplace` no longer emit spurious change stream events when the document is unchanged
+- `CreateCollection` now throws `MongoCommandException` (code 48, NamespaceExists) when the collection already exists (was silently succeeding)
+
+### Added
+- 7 new integration tests covering all fixes
+
 ## [0.11.44] - 2025-07-11
 
 ### Fixed

@@ -869,12 +869,14 @@ internal static class BsonUpdateEvaluator
         if (!a.IsNumeric)
             throw MongoErrors.BadValue($"Cannot apply $inc to a value of non-numeric type {a.BsonType}");
 
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/inc/
+        //   Type precedence: Decimal128 > Double > Int64 > Int32
         return (a.BsonType, b.BsonType) switch
         {
+            (BsonType.Decimal128, _) or (_, BsonType.Decimal128) =>
+                new BsonDecimal128((Decimal128)(ToDecimalSafe(a) + ToDecimalSafe(b))),
             (BsonType.Double, _) or (_, BsonType.Double) =>
                 new BsonDouble(a.ToDouble() + b.ToDouble()),
-            (BsonType.Decimal128, _) or (_, BsonType.Decimal128) =>
-                new BsonDecimal128(Decimal128.ToDecimal(a.AsDecimal128) + Decimal128.ToDecimal(b.AsDecimal128)),
             (BsonType.Int64, _) or (_, BsonType.Int64) =>
                 new BsonInt64(a.ToInt64() + b.ToInt64()),
             _ =>
@@ -889,18 +891,28 @@ internal static class BsonUpdateEvaluator
         if (!a.IsNumeric)
             throw MongoErrors.BadValue($"Cannot apply $mul to a value of non-numeric type {a.BsonType}");
 
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/mul/
+        //   Type precedence: Decimal128 > Double > Int64 > Int32
         return (a.BsonType, b.BsonType) switch
         {
+            (BsonType.Decimal128, _) or (_, BsonType.Decimal128) =>
+                new BsonDecimal128((Decimal128)(ToDecimalSafe(a) * ToDecimalSafe(b))),
             (BsonType.Double, _) or (_, BsonType.Double) =>
                 new BsonDouble(a.ToDouble() * b.ToDouble()),
-            (BsonType.Decimal128, _) or (_, BsonType.Decimal128) =>
-                new BsonDecimal128(Decimal128.ToDecimal(a.AsDecimal128) * Decimal128.ToDecimal(b.AsDecimal128)),
             (BsonType.Int64, _) or (_, BsonType.Int64) =>
                 new BsonInt64(a.ToInt64() * b.ToInt64()),
             _ =>
                 new BsonInt32(a.ToInt32() * b.ToInt32()),
         };
     }
+
+    private static decimal ToDecimalSafe(BsonValue v) => v.BsonType switch
+    {
+        BsonType.Decimal128 => Decimal128.ToDecimal(v.AsDecimal128),
+        BsonType.Double => (decimal)v.AsDouble,
+        BsonType.Int64 => v.AsInt64,
+        _ => v.ToInt32(),
+    };
 
     #endregion
 

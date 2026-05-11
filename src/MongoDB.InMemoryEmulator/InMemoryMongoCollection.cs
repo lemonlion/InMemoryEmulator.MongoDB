@@ -519,7 +519,10 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         var beforeChange = target.DeepClone().AsBsonDocument;
         var (_, modified) = _store.Replace(targetId, replacementBson);
 
-        PublishChangeEvent(ChangeStreamOperationType.Replace, replacementBson, beforeChange);
+        // Ref: https://www.mongodb.com/docs/manual/changeStreams/
+        //   Change stream events are only emitted when the document is actually modified.
+        if (modified)
+            PublishChangeEvent(ChangeStreamOperationType.Replace, replacementBson, beforeChange);
         return new ReplaceOneResult.Acknowledged(1, modified ? 1 : 0, null);
     }
 
@@ -844,7 +847,10 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         _indexManager.ValidateDocument(replacementBson, excludeId: targetId);
         ValidateSchemaOnWrite(replacementBson);
         var (_, wasModified) = _store.Replace(targetId, replacementBson);
-        PublishChangeEvent(ChangeStreamOperationType.Replace, replacementBson, target);
+        // Ref: https://www.mongodb.com/docs/manual/changeStreams/
+        //   Change stream events are only emitted when the document is actually modified.
+        if (wasModified)
+            PublishChangeEvent(ChangeStreamOperationType.Replace, replacementBson, target);
 
         // Ref: https://www.mongodb.com/docs/manual/reference/command/findAndModify/
         //   "returnDocument: 'before' returns the original document, 'after' returns the modified document."

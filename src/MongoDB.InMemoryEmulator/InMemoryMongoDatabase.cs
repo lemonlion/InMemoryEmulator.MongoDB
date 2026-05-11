@@ -94,9 +94,11 @@ public class InMemoryMongoDatabase : IMongoDatabase
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!_explicitlyCreated.TryAdd(name, true) && _explicitlyCreated.ContainsKey(name))
+        // Ref: https://www.mongodb.com/docs/manual/reference/command/create/
+        //   "If the collection or view already exists, the operation errors with NamespaceExists (48)."
+        if (!_explicitlyCreated.TryAdd(name, true))
         {
-            // Collection already explicitly created — OK per MongoDB behavior (no error for already existing)
+            throw MongoErrors.NamespaceExists($"{DatabaseNamespace.DatabaseName}.{name}");
         }
 
         var store = GetOrCreateStore(name);
