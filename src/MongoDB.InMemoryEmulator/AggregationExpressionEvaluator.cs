@@ -1451,9 +1451,19 @@ internal static class AggregationExpressionEvaluator
             "int" => new BsonInt32(input.ToInt32()),
             "long" => new BsonInt64(input.ToInt64()),
             "decimal" => new BsonDecimal128(input.ToDecimal()),
-            "date" => input.IsString ? new BsonDateTime(DateTime.Parse(input.AsString, CultureInfo.InvariantCulture)) : new BsonDateTime(BsonUtils.ToDateTimeFromMillisecondsSinceEpoch(input.ToInt64())),
-            "objectId" => input.IsString ? new BsonObjectId(ObjectId.Parse(input.AsString)) : input,
-            _ => input
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/convert/
+            //   "Returns a date that corresponds to the timestamp of the ObjectId."
+            "date" => input.IsObjectId
+                ? new BsonDateTime(input.AsObjectId.CreationTime)
+                : input.IsString
+                    ? new BsonDateTime(DateTime.Parse(input.AsString, CultureInfo.InvariantCulture))
+                    : new BsonDateTime(BsonUtils.ToDateTimeFromMillisecondsSinceEpoch(input.ToInt64())),
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/convert/
+            //   Only string inputs are valid for conversion to ObjectId.
+            "objectId" => input.IsString
+                ? new BsonObjectId(ObjectId.Parse(input.AsString))
+                : throw MongoErrors.BadValue($"Failed to parse objectId from: {input}"),
+            _ => throw MongoErrors.BadValue($"$convert: unknown type '{type}'")
         };
     }
 
