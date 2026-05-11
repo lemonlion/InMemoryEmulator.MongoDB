@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.46] - 2025-07-11
+
+### Fixed
+- Aggregation `$add`, `$subtract`, `$multiply`, `$mod` now return `Decimal128` when any operand is Decimal128 (was incorrectly returning Double)
+- `$dateDiff` with `unit: "week"` now correctly counts weekly boundaries crossed instead of naive division by 7
+- `$dateDiff` with `unit: "quarter"` now correctly counts quarter boundaries crossed (Jan/Apr/Jul/Oct) instead of naive month-diff/3
+- `$dateDiff` now supports `startOfWeek` parameter for week boundary counting
+
+### Added
+- 10 new integration tests covering all fixes
+
 ## [0.11.45] - 2025-07-11
 
 ### Fixed

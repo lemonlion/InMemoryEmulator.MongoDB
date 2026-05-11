@@ -349,7 +349,9 @@ internal static class AggregationExpressionEvaluator
 
         // Check if any argument is a date
         BsonDateTime? dateArg = null;
+        decimal decimalSum = 0;
         double numericSum = 0;
+        bool hasDecimal = false;
         bool hasDouble = false;
         bool hasLong = false;
         foreach (var v in arr)
@@ -364,8 +366,9 @@ internal static class AggregationExpressionEvaluator
             else
             {
                 numericSum += v.ToDouble();
-                if (v.BsonType == BsonType.Double || v.BsonType == BsonType.Decimal128) hasDouble = true;
-                else if (v.BsonType == BsonType.Int64) hasLong = true;
+                if (v.BsonType == BsonType.Decimal128) { hasDecimal = true; decimalSum += v.AsDecimal; }
+                else if (v.BsonType == BsonType.Double) { hasDouble = true; decimalSum += (decimal)v.AsDouble; }
+                else { var lv = v.ToInt64(); decimalSum += lv; if (v.BsonType == BsonType.Int64) hasLong = true; }
             }
         }
 
@@ -374,6 +377,7 @@ internal static class AggregationExpressionEvaluator
 
         // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/add/
         //   Type promotion: integer → long → double → decimal
+        if (hasDecimal) return new BsonDecimal128((Decimal128)decimalSum);
         return WrapNumeric(numericSum, hasDouble, hasLong);
     }
 
@@ -401,9 +405,15 @@ internal static class AggregationExpressionEvaluator
             return new BsonDateTime(arr[0].AsBsonDateTime.ToUniversalTime().AddMilliseconds(-arr[1].ToDouble()));
         }
 
-        bool hasDouble = arr[0].BsonType == BsonType.Double || arr[0].BsonType == BsonType.Decimal128
-                      || arr[1].BsonType == BsonType.Double || arr[1].BsonType == BsonType.Decimal128;
+        bool hasDecimal = arr[0].BsonType == BsonType.Decimal128 || arr[1].BsonType == BsonType.Decimal128;
+        bool hasDouble = arr[0].BsonType == BsonType.Double || arr[1].BsonType == BsonType.Double;
         bool hasLong = arr[0].BsonType == BsonType.Int64 || arr[1].BsonType == BsonType.Int64;
+        if (hasDecimal)
+        {
+            decimal a = arr[0].BsonType == BsonType.Decimal128 ? arr[0].AsDecimal : (decimal)arr[0].ToDouble();
+            decimal b = arr[1].BsonType == BsonType.Decimal128 ? arr[1].AsDecimal : (decimal)arr[1].ToDouble();
+            return new BsonDecimal128((Decimal128)(a - b));
+        }
         return WrapNumeric(arr[0].ToDouble() - arr[1].ToDouble(), hasDouble, hasLong);
     }
 
@@ -413,15 +423,19 @@ internal static class AggregationExpressionEvaluator
         //   Type promotion: integer → long → double → decimal
         var arr = EvalArray(doc, args, variables);
         double product = 1;
+        decimal decProduct = 1;
+        bool hasDecimal = false;
         bool hasDouble = false;
         bool hasLong = false;
         foreach (var v in arr)
         {
             if (v == BsonNull.Value) return BsonNull.Value;
             product *= v.ToDouble();
-            if (v.BsonType == BsonType.Double || v.BsonType == BsonType.Decimal128) hasDouble = true;
-            else if (v.BsonType == BsonType.Int64) hasLong = true;
+            if (v.BsonType == BsonType.Decimal128) { hasDecimal = true; decProduct *= v.AsDecimal; }
+            else if (v.BsonType == BsonType.Double) { hasDouble = true; decProduct *= (decimal)v.AsDouble; }
+            else { var lv = v.ToInt64(); decProduct *= lv; if (v.BsonType == BsonType.Int64) hasLong = true; }
         }
+        if (hasDecimal) return new BsonDecimal128((Decimal128)decProduct);
         return WrapNumeric(product, hasDouble, hasLong);
     }
 
@@ -437,12 +451,18 @@ internal static class AggregationExpressionEvaluator
     private static BsonValue EvalMod(BsonDocument doc, BsonValue args, BsonDocument? variables)
     {
         // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/mod/
-        //   Preserves type: integer % integer → integer
+        //   Type promotion: integer → long → double → decimal
         var arr = EvalArray(doc, args, variables);
         if (arr[0] == BsonNull.Value || arr[1] == BsonNull.Value) return BsonNull.Value;
-        bool hasDouble = arr[0].BsonType == BsonType.Double || arr[0].BsonType == BsonType.Decimal128
-                      || arr[1].BsonType == BsonType.Double || arr[1].BsonType == BsonType.Decimal128;
+        bool hasDecimal = arr[0].BsonType == BsonType.Decimal128 || arr[1].BsonType == BsonType.Decimal128;
+        bool hasDouble = arr[0].BsonType == BsonType.Double || arr[1].BsonType == BsonType.Double;
         bool hasLong = arr[0].BsonType == BsonType.Int64 || arr[1].BsonType == BsonType.Int64;
+        if (hasDecimal)
+        {
+            decimal a = arr[0].BsonType == BsonType.Decimal128 ? arr[0].AsDecimal : (decimal)arr[0].ToDouble();
+            decimal b = arr[1].BsonType == BsonType.Decimal128 ? arr[1].AsDecimal : (decimal)arr[1].ToDouble();
+            return new BsonDecimal128((Decimal128)(a % b));
+        }
         return WrapNumeric(arr[0].ToDouble() % arr[1].ToDouble(), hasDouble, hasLong);
     }
 
@@ -596,8 +616,8 @@ internal static class AggregationExpressionEvaluator
         // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/toUpper/
         //   "If the argument resolves to null, $toUpper returns an empty string ''." (same for $toLower)
         if (val == BsonNull.Value) return new BsonString("");
-        if (!val.IsString)
-            throw MongoErrors.BadValue($"$toUpper/$toLower only supports string types, not {val.BsonType}");
+        // Real MongoDB returns "" for non-string types rather than throwing.
+        if (!val.IsString) return new BsonString("");
         return new BsonString(fn(val.AsString));
     }
 
@@ -1639,15 +1659,48 @@ internal static class AggregationExpressionEvaluator
             "minute" => (long)diff.TotalMinutes,
             "hour" => (long)diff.TotalHours,
             "day" => (long)diff.TotalDays,
-            "week" => (long)diff.TotalDays / 7,
             // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/dateDiff/
-            //   unit supports "quarter"
+            //   "week" counts weekly boundaries crossed. Default startOfWeek is Sunday.
+            "week" => CountWeekBoundaries(start, end, spec.Contains("startOfWeek") ? spec["startOfWeek"].AsString : "sunday"),
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/dateDiff/
+            //   "month" counts calendar month boundaries crossed.
             "month" => (end.Year - start.Year) * 12 + (end.Month - start.Month),
-            "quarter" => ((end.Year - start.Year) * 12 + (end.Month - start.Month)) / 3,
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/dateDiff/
+            //   "quarter" counts quarter boundaries crossed (Jan 1, Apr 1, Jul 1, Oct 1).
+            "quarter" => (end.Year * 4 + (end.Month - 1) / 3) - (start.Year * 4 + (start.Month - 1) / 3),
             "year" => end.Year - start.Year,
             _ => throw MongoErrors.BadValue($"Unknown date unit: {unit}")
         };
         return new BsonInt64(result);
+    }
+
+    private static long CountWeekBoundaries(DateTime start, DateTime end, string startOfWeek)
+    {
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/dateDiff/
+        //   Counts the number of times the startOfWeek day is crossed between start and end.
+        var dow = startOfWeek.ToLowerInvariant() switch
+        {
+            "sunday" or "sun" => DayOfWeek.Sunday,
+            "monday" or "mon" => DayOfWeek.Monday,
+            "tuesday" or "tue" => DayOfWeek.Tuesday,
+            "wednesday" or "wed" => DayOfWeek.Wednesday,
+            "thursday" or "thu" => DayOfWeek.Thursday,
+            "friday" or "fri" => DayOfWeek.Friday,
+            "saturday" or "sat" => DayOfWeek.Saturday,
+            _ => DayOfWeek.Sunday
+        };
+
+        if (end < start) return -CountWeekBoundaries(end, start, startOfWeek);
+        if (end == start) return 0;
+
+        // Days until next boundary from start
+        int startDaysUntil = ((int)dow - (int)start.DayOfWeek + 7) % 7;
+        if (startDaysUntil == 0) startDaysUntil = 7; // current day doesn't count as a crossed boundary
+        var firstBoundary = start.AddDays(startDaysUntil);
+
+        if (firstBoundary > end) return 0;
+
+        return (long)((end - firstBoundary).TotalDays / 7) + 1;
     }
 
     private static DateTime AddToDate(DateTime dt, string unit, long amount)
