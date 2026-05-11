@@ -1091,6 +1091,10 @@ internal static class AggregationExpressionEvaluator
         }
         int pos = arr[1].ToInt32();
         int count = arr[2].ToInt32();
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/slice/
+        //   "If <position> is specified, <n> must resolve to a positive integer."
+        if (count < 0)
+            throw MongoErrors.BadValue("$slice: if position is specified, n must be a positive integer");
         if (pos < 0) pos = Math.Max(0, array.Count + pos);
         return new BsonArray(array.Skip(pos).Take(count));
     }

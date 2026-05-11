@@ -97,6 +97,7 @@ internal static class AggregationPipelineExecutor
     {
         // Determine mode: inclusion vs exclusion vs expression-only
         bool hasIncludes = false;
+        bool hasExcludes = false;
         bool hasExpressions = false;
 
         foreach (var el in spec)
@@ -113,12 +114,19 @@ internal static class AggregationPipelineExecutor
             else if (el.Value.IsNumeric || el.Value.IsBoolean)
             {
                 if (el.Value.ToBoolean()) hasIncludes = true;
+                else hasExcludes = true;
             }
             else
             {
                 hasExpressions = true; // string field expression like "$fieldName"
             }
         }
+
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/project/
+        //   "If you specify the exclusion of a field other than _id, you cannot employ any other
+        //    $project specification forms."
+        if (hasExcludes && (hasIncludes || hasExpressions))
+            throw MongoErrors.BadValue("$project: Cannot do exclusion on field in inclusion projection");
 
         // Expression-only or mixed with includes → inclusion mode
         // Exclusion mode: all non-_id specs evaluate to false
