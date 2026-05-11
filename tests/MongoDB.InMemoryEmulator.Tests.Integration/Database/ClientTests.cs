@@ -46,33 +46,44 @@ public class ClientTests : IAsyncLifetime
     }
 
     [Fact]
-    [Trait(TestTraits.Target, TestTraits.InMemoryOnly)]
+    [Trait(TestTraits.Target, TestTraits.All)]
     public async Task ListDatabaseNames_includes_databases_with_data()
     {
-        // This test is InMemoryOnly because a real MongoDB instance may have other databases
-        var client = new InMemoryMongoClient();
-        var db = client.GetDatabase("listdb_test");
+        // Ref: https://www.mongodb.com/docs/manual/reference/command/listDatabases/
+        //   "The listDatabases command provides a list of all existing databases."
+        var client = _fixture.Client;
+        var dbName = $"listdb_test_{Guid.NewGuid():N}";
+        var db = client.GetDatabase(dbName);
         var collection = db.GetCollection<TestDoc>("data");
         await collection.InsertOneAsync(new TestDoc { Name = "Data" });
 
-        var cursor = await client.ListDatabaseNamesAsync();
-        var names = await cursor.ToListAsync();
-
-        names.Should().Contain("listdb_test");
+        try
+        {
+            var cursor = await client.ListDatabaseNamesAsync();
+            var names = await cursor.ToListAsync();
+            names.Should().Contain(dbName);
+        }
+        finally
+        {
+            await client.DropDatabaseAsync(dbName);
+        }
     }
 
     [Fact]
-    [Trait(TestTraits.Target, TestTraits.InMemoryOnly)]
+    [Trait(TestTraits.Target, TestTraits.All)]
     public async Task DropDatabase_removes_database()
     {
-        var client = new InMemoryMongoClient();
-        var db = client.GetDatabase("drop_db_test");
+        // Ref: https://www.mongodb.com/docs/manual/reference/command/dropDatabase/
+        //   "The dropDatabase command drops the current database."
+        var client = _fixture.Client;
+        var dbName = $"drop_db_test_{Guid.NewGuid():N}";
+        var db = client.GetDatabase(dbName);
         await db.GetCollection<TestDoc>("data").InsertOneAsync(new TestDoc { Name = "WillBeDropped" });
 
-        await client.DropDatabaseAsync("drop_db_test");
+        await client.DropDatabaseAsync(dbName);
 
         var cursor = await client.ListDatabaseNamesAsync();
         var names = await cursor.ToListAsync();
-        names.Should().NotContain("drop_db_test");
+        names.Should().NotContain(dbName);
     }
 }

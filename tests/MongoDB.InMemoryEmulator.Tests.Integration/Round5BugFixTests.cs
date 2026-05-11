@@ -103,7 +103,7 @@ public class Round5BugFixTests : IAsyncLifetime
     #region Bug 2: InsertMany change stream events
 
     [Fact]
-    [Trait(TestTraits.Target, TestTraits.InMemoryOnly)]
+    [Trait(TestTraits.Target, TestTraits.All)]
     public async Task InsertMany_PublishesChangeStreamEvents()
     {
         // Ref: https://www.mongodb.com/docs/manual/changeStreams/
@@ -120,11 +120,7 @@ public class Round5BugFixTests : IAsyncLifetime
             new BsonDocument { { "x", 3 } },
         });
 
-        await Task.Delay(100);
-        var hasEvents = await cursor.MoveNextAsync();
-        Assert.True(hasEvents, "InsertMany should produce change stream events");
-
-        var events = cursor.Current.ToList();
+        var events = await ChangeStreamHelper.WaitForEventsAsync(cursor, 3);
         Assert.Equal(3, events.Count);
         Assert.All(events, e => Assert.Equal("insert", e["operationType"].AsString));
     }

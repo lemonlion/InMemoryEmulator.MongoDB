@@ -206,13 +206,14 @@ public class RunCommandTests : IAsyncLifetime
     }
 
     [Fact]
-    [Trait(TestTraits.Target, TestTraits.InMemoryOnly)]
-    public void Unknown_command_returns_error_document()
+    [Trait(TestTraits.Target, TestTraits.All)]
+    public void Unknown_command_throws_MongoCommandException()
     {
-        // In-memory returns an error document; real MongoDB throws MongoCommandException
-        var result = _fixture.Database.RunCommand<BsonDocument>(
-            new BsonDocument("unknownCommand", 1));
-        Assert.Equal(0, result["ok"].ToInt32());
-        Assert.True(result.Contains("errmsg"));
+        // Ref: https://www.mongodb.com/docs/manual/reference/command/
+        //   Real MongoDB throws MongoCommandException with code 59 for unknown commands.
+        var ex = Assert.Throws<MongoCommandException>(() =>
+            _fixture.Database.RunCommand<BsonDocument>(
+                new BsonDocument("unknownCommand", 1)));
+        Assert.Contains("no such command", ex.Message);
     }
 }

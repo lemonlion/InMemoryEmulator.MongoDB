@@ -442,12 +442,12 @@ public class InMemoryMongoDatabase : IMongoDatabase
             // Ref: https://www.mongodb.com/docs/manual/reference/command/explain/
             //   "Returns information on the execution of various operations."
             "explain" => HandleExplain(cmd),
-            _ => new BsonDocument
-            {
-                { "ok", 0 },
-                { "errmsg", $"no such command: '{commandName}'" },
-                { "code", 59 }
-            }
+            // Ref: https://www.mongodb.com/docs/manual/reference/command/
+            //   Real MongoDB throws MongoCommandException with code 59 for unknown commands.
+            _ => throw new MongoCommandException(
+                MongoErrors.SyntheticConnectionId,
+                $"no such command: '{commandName}'",
+                new BsonDocument { { "ok", 0 }, { "errmsg", $"no such command: '{commandName}'" }, { "code", 59 }, { "codeName", "CommandNotFound" } })
         };
     }
 

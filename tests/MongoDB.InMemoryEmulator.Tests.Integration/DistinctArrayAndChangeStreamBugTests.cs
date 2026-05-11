@@ -117,7 +117,7 @@ public class DistinctArrayAndChangeStreamBugTests : IAsyncLifetime
     #region Change stream events from UpdateMany / DeleteMany / FindOneAnd*
 
     [Fact]
-    [Trait(TestTraits.Target, TestTraits.InMemoryOnly)]
+    [Trait(TestTraits.Target, TestTraits.All)]
     public async Task Watch_receives_events_from_UpdateMany()
     {
         // Ref: https://www.mongodb.com/docs/manual/changeStreams/
@@ -129,21 +129,19 @@ public class DistinctArrayAndChangeStreamBugTests : IAsyncLifetime
             new BsonDocument { { "_id", "um2" }, { "status", "pending" } },
         });
 
-        using var cursor = col.Watch(RawPipeline());
+        using var cursor = await col.WatchAsync(RawPipeline());
 
         await col.UpdateManyAsync(
             Builders<BsonDocument>.Filter.Eq("status", "pending"),
             Builders<BsonDocument>.Update.Set("status", "done"));
 
-        var hasEvents = cursor.MoveNext();
-        Assert.True(hasEvents);
-        var events = cursor.Current.ToList();
+        var events = await ChangeStreamHelper.WaitForEventsAsync(cursor, 2);
         Assert.Equal(2, events.Count);
         Assert.All(events, e => Assert.Equal("update", e["operationType"].AsString));
     }
 
     [Fact]
-    [Trait(TestTraits.Target, TestTraits.InMemoryOnly)]
+    [Trait(TestTraits.Target, TestTraits.All)]
     public async Task Watch_receives_events_from_DeleteMany()
     {
         // Ref: https://www.mongodb.com/docs/manual/changeStreams/
@@ -155,71 +153,66 @@ public class DistinctArrayAndChangeStreamBugTests : IAsyncLifetime
             new BsonDocument { { "_id", "dm2" }, { "temp", true } },
         });
 
-        using var cursor = col.Watch(RawPipeline());
+        using var cursor = await col.WatchAsync(RawPipeline());
 
         await col.DeleteManyAsync(Builders<BsonDocument>.Filter.Eq("temp", true));
 
-        var hasEvents = cursor.MoveNext();
-        Assert.True(hasEvents);
-        var events = cursor.Current.ToList();
+        var events = await ChangeStreamHelper.WaitForEventsAsync(cursor, 2);
         Assert.Equal(2, events.Count);
         Assert.All(events, e => Assert.Equal("delete", e["operationType"].AsString));
     }
 
     [Fact]
-    [Trait(TestTraits.Target, TestTraits.InMemoryOnly)]
+    [Trait(TestTraits.Target, TestTraits.All)]
     public async Task Watch_receives_event_from_FindOneAndDelete()
     {
         var col = _fixture.GetCollection<BsonDocument>("cs_find_del");
         await col.InsertOneAsync(new BsonDocument { { "_id", "fd1" }, { "name", "ToDelete" } });
 
-        using var cursor = col.Watch(RawPipeline());
+        using var cursor = await col.WatchAsync(RawPipeline());
 
         await col.FindOneAndDeleteAsync(Builders<BsonDocument>.Filter.Eq("_id", "fd1"));
 
-        var hasEvents = cursor.MoveNext();
-        Assert.True(hasEvents);
-        var evt = cursor.Current.First();
-        Assert.Equal("delete", evt["operationType"].AsString);
-        Assert.Equal("fd1", evt["documentKey"]["_id"].AsString);
+        var events = await ChangeStreamHelper.WaitForEventsAsync(cursor, 1);
+        Assert.Single(events);
+        Assert.Equal("delete", events[0]["operationType"].AsString);
+        Assert.Equal("fd1", events[0]["documentKey"]["_id"].AsString);
     }
 
     [Fact]
-    [Trait(TestTraits.Target, TestTraits.InMemoryOnly)]
+    [Trait(TestTraits.Target, TestTraits.All)]
     public async Task Watch_receives_event_from_FindOneAndReplace()
     {
         var col = _fixture.GetCollection<BsonDocument>("cs_find_rep");
         await col.InsertOneAsync(new BsonDocument { { "_id", "fr1" }, { "name", "Old" } });
 
-        using var cursor = col.Watch(RawPipeline());
+        using var cursor = await col.WatchAsync(RawPipeline());
 
         await col.FindOneAndReplaceAsync(
             Builders<BsonDocument>.Filter.Eq("_id", "fr1"),
             new BsonDocument { { "_id", "fr1" }, { "name", "New" } });
 
-        var hasEvents = cursor.MoveNext();
-        Assert.True(hasEvents);
-        var evt = cursor.Current.First();
-        Assert.Equal("replace", evt["operationType"].AsString);
+        var events = await ChangeStreamHelper.WaitForEventsAsync(cursor, 1);
+        Assert.Single(events);
+        Assert.Equal("replace", events[0]["operationType"].AsString);
     }
 
     [Fact]
-    [Trait(TestTraits.Target, TestTraits.InMemoryOnly)]
+    [Trait(TestTraits.Target, TestTraits.All)]
     public async Task Watch_receives_event_from_FindOneAndUpdate()
     {
         var col = _fixture.GetCollection<BsonDocument>("cs_find_upd");
         await col.InsertOneAsync(new BsonDocument { { "_id", "fu1" }, { "count", 0 } });
 
-        using var cursor = col.Watch(RawPipeline());
+        using var cursor = await col.WatchAsync(RawPipeline());
 
         await col.FindOneAndUpdateAsync(
             Builders<BsonDocument>.Filter.Eq("_id", "fu1"),
             Builders<BsonDocument>.Update.Inc("count", 1));
 
-        var hasEvents = cursor.MoveNext();
-        Assert.True(hasEvents);
-        var evt = cursor.Current.First();
-        Assert.Equal("update", evt["operationType"].AsString);
+        var events = await ChangeStreamHelper.WaitForEventsAsync(cursor, 1);
+        Assert.Single(events);
+        Assert.Equal("update", events[0]["operationType"].AsString);
     }
 
     #endregion
@@ -227,7 +220,7 @@ public class DistinctArrayAndChangeStreamBugTests : IAsyncLifetime
     #region UpdateMany should use Update (not Replace) change type
 
     [Fact]
-    [Trait(TestTraits.Target, TestTraits.InMemoryOnly)]
+    [Trait(TestTraits.Target, TestTraits.All)]
     public async Task UpdateMany_records_Update_change_type_not_Replace()
     {
         // Ref: https://www.mongodb.com/docs/manual/changeStreams/
@@ -240,15 +233,13 @@ public class DistinctArrayAndChangeStreamBugTests : IAsyncLifetime
             new BsonDocument { { "_id", "t2" }, { "status", "a" } },
         });
 
-        using var cursor = col.Watch(RawPipeline());
+        using var cursor = await col.WatchAsync(RawPipeline());
 
         await col.UpdateManyAsync(
             Builders<BsonDocument>.Filter.Eq("status", "a"),
             Builders<BsonDocument>.Update.Set("status", "b"));
 
-        var hasEvents = cursor.MoveNext();
-        Assert.True(hasEvents);
-        var events = cursor.Current.ToList();
+        var events = await ChangeStreamHelper.WaitForEventsAsync(cursor, 2);
         // All events should be "update", NOT "replace"
         Assert.All(events, e => Assert.Equal("update", e["operationType"].AsString));
     }

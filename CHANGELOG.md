@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.60] - 2025-07-11
+
+### Fixed
+- Unknown `RunCommand` commands now throw `MongoCommandException` (code 59) instead of returning an error document, matching real MongoDB behavior
+- GridFS empty file test now verifies behavior against both in-memory and real MongoDB
+
+### Changed
+- 26 tests converted from `InMemoryOnly` to `All` target, now verified against real MongoDB:
+  - All change stream tests rewritten with async polling via `ChangeStreamHelper.WaitForEventsAsync` for real MongoDB compatibility
+  - `ChangeStreamTests` (10 tests): insert, update, delete, replace, multiple events, resume token, database/client-level watch, async watch
+  - `DistinctArrayAndChangeStreamBugTests` (7 tests): UpdateMany, DeleteMany, FindOneAndDelete/Replace/Update events, UpdateMany change type
+  - `Round4BugFixTests` (4 tests): upsert change stream events (UpdateOne, ReplaceOne, FindOneAndUpdate), BulkWrite change events
+  - `Round5BugFixTests` (1 test): InsertMany change stream events
+  - `Round43BugFixTests` (1 test): delete event with fullDocumentBeforeChange, plus 4 non-change-stream tests now using fixture
+  - `ClientTests` (2 tests): ListDatabaseNames and DropDatabase now use fixture with unique DB names
+  - `Round16BugFixTests` (1 test): ListDatabaseNames excludes empty databases
+
+### Added
+- `ChangeStreamHelper` shared utility for polling change stream events with timeout
+
 ## [0.11.59] - 2025-07-11
 
 ### Fixed

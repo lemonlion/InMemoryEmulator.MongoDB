@@ -162,15 +162,16 @@ public class Round16BugFixTests : IAsyncLifetime
     #region ListDatabaseNames excludes empty databases
 
     [Fact]
-    [Trait(TestTraits.Target, TestTraits.InMemoryOnly)]
+    [Trait(TestTraits.Target, TestTraits.All)]
     public async Task ListDatabaseNames_ExcludesEmptyDatabases()
     {
         // Ref: https://www.mongodb.com/docs/manual/reference/command/listDatabases/
         //   "By default, MongoDB does not include empty databases in the output."
         var client = _fixture.Client;
+        var dbName = $"temp_empty_db_test_{Guid.NewGuid():N}";
 
         // Create a database with data then drop the collection
-        var db = client.GetDatabase("temp_empty_db_test");
+        var db = client.GetDatabase(dbName);
         var col = db.GetCollection<BsonDocument>("temp_col");
         await col.InsertOneAsync(new BsonDocument("x", 1));
         await db.DropCollectionAsync("temp_col");
@@ -178,7 +179,7 @@ public class Round16BugFixTests : IAsyncLifetime
         // The empty database should not appear in list
         var dbNames = await client.ListDatabaseNamesAsync();
         var names = await dbNames.ToListAsync();
-        Assert.DoesNotContain("temp_empty_db_test", names);
+        Assert.DoesNotContain(dbName, names);
     }
 
     #endregion

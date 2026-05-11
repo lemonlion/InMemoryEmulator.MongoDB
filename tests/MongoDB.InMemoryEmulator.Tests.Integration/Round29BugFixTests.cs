@@ -109,22 +109,30 @@ public class Round29BugFixTests : IAsyncLifetime
     //    there are no documents in the chunks collection."
 
     [Fact]
-    [Trait(TestTraits.Target, TestTraits.InMemoryOnly)]
-    public void GridFS_EmptyFile_HasNoChunks()
+    [Trait(TestTraits.Target, TestTraits.All)]
+    public async Task GridFS_EmptyFile_HasNoChunks()
     {
-        var client = new InMemoryMongoClient();
-        var db = client.GetDatabase("testdb");
-        var bucket = new InMemoryGridFSBucket(db, new GridFSBucketOptions { BucketName = "fs" });
-        var chunksCollection = db.GetCollection<BsonDocument>("fs.chunks");
+        var db = _fixture.Database;
 
-        var fileId = bucket.UploadFromBytes("empty.bin", Array.Empty<byte>());
+        ObjectId fileId;
+        if (_fixture.IsRealMongo)
+        {
+            var bucket = new GridFSBucket(db, new GridFSBucketOptions { BucketName = "fs_empty" });
+            fileId = await bucket.UploadFromBytesAsync("empty.bin", Array.Empty<byte>());
+        }
+        else
+        {
+            var bucket = new InMemoryGridFSBucket(db, new GridFSBucketOptions { BucketName = "fs_empty" });
+            fileId = await bucket.UploadFromBytesAsync("empty.bin", Array.Empty<byte>());
+        }
 
-        var chunks = chunksCollection.Find(Builders<BsonDocument>.Filter.Eq("files_id", fileId)).ToList();
+        var chunksCollection = db.GetCollection<BsonDocument>("fs_empty.chunks");
+        var chunks = await chunksCollection.Find(Builders<BsonDocument>.Filter.Eq("files_id", fileId)).ToListAsync();
         Assert.Empty(chunks);
 
         // file doc should still exist with length 0
-        var filesCollection = db.GetCollection<BsonDocument>("fs.files");
-        var fileDoc = filesCollection.Find(Builders<BsonDocument>.Filter.Eq("_id", fileId)).FirstOrDefault();
+        var filesCollection = db.GetCollection<BsonDocument>("fs_empty.files");
+        var fileDoc = await filesCollection.Find(Builders<BsonDocument>.Filter.Eq("_id", fileId)).FirstOrDefaultAsync();
         Assert.NotNull(fileDoc);
         Assert.Equal(0L, fileDoc["length"].ToInt64());
     }

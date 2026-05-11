@@ -123,62 +123,59 @@ public class Round4BugFixTests : IAsyncLifetime
     #region Upsert change stream events
 
     [Fact]
-    [Trait(TestTraits.Target, TestTraits.InMemoryOnly)]
+    [Trait(TestTraits.Target, TestTraits.All)]
     public async Task Watch_receives_insert_event_from_UpdateOne_upsert()
     {
         // Ref: https://www.mongodb.com/docs/manual/changeStreams/
         //   "Change streams notify about insert, update, replace, delete events."
         var col = _fixture.GetCollection<BsonDocument>("cs_upsert_update");
 
-        using var cursor = col.Watch(RawPipeline());
+        using var cursor = await col.WatchAsync(RawPipeline());
 
         await col.UpdateOneAsync(
             Builders<BsonDocument>.Filter.Eq("_id", "upsert1"),
             Builders<BsonDocument>.Update.Set("name", "Upserted"),
             new UpdateOptions { IsUpsert = true });
 
-        var hasEvents = cursor.MoveNext();
-        Assert.True(hasEvents);
-        var evt = cursor.Current.First();
-        Assert.Equal("insert", evt["operationType"].AsString);
+        var events = await ChangeStreamHelper.WaitForEventsAsync(cursor, 1);
+        Assert.Single(events);
+        Assert.Equal("insert", events[0]["operationType"].AsString);
     }
 
     [Fact]
-    [Trait(TestTraits.Target, TestTraits.InMemoryOnly)]
+    [Trait(TestTraits.Target, TestTraits.All)]
     public async Task Watch_receives_insert_event_from_ReplaceOne_upsert()
     {
         var col = _fixture.GetCollection<BsonDocument>("cs_upsert_replace");
 
-        using var cursor = col.Watch(RawPipeline());
+        using var cursor = await col.WatchAsync(RawPipeline());
 
         await col.ReplaceOneAsync(
             Builders<BsonDocument>.Filter.Eq("_id", "upsert2"),
             new BsonDocument { { "_id", "upsert2" }, { "name", "Replaced" } },
             new ReplaceOptions { IsUpsert = true });
 
-        var hasEvents = cursor.MoveNext();
-        Assert.True(hasEvents);
-        var evt = cursor.Current.First();
-        Assert.Equal("insert", evt["operationType"].AsString);
+        var events = await ChangeStreamHelper.WaitForEventsAsync(cursor, 1);
+        Assert.Single(events);
+        Assert.Equal("insert", events[0]["operationType"].AsString);
     }
 
     [Fact]
-    [Trait(TestTraits.Target, TestTraits.InMemoryOnly)]
+    [Trait(TestTraits.Target, TestTraits.All)]
     public async Task Watch_receives_insert_event_from_FindOneAndUpdate_upsert()
     {
         var col = _fixture.GetCollection<BsonDocument>("cs_upsert_findupd");
 
-        using var cursor = col.Watch(RawPipeline());
+        using var cursor = await col.WatchAsync(RawPipeline());
 
         await col.FindOneAndUpdateAsync(
             Builders<BsonDocument>.Filter.Eq("_id", "upsert3"),
             Builders<BsonDocument>.Update.Set("name", "Found"),
             new FindOneAndUpdateOptions<BsonDocument> { IsUpsert = true });
 
-        var hasEvents = cursor.MoveNext();
-        Assert.True(hasEvents);
-        var evt = cursor.Current.First();
-        Assert.Equal("insert", evt["operationType"].AsString);
+        var events = await ChangeStreamHelper.WaitForEventsAsync(cursor, 1);
+        Assert.Single(events);
+        Assert.Equal("insert", events[0]["operationType"].AsString);
     }
 
     #endregion
@@ -208,22 +205,21 @@ public class Round4BugFixTests : IAsyncLifetime
     }
 
     [Fact]
-    [Trait(TestTraits.Target, TestTraits.InMemoryOnly)]
+    [Trait(TestTraits.Target, TestTraits.All)]
     public async Task BulkWrite_InsertOneModel_PublishesChangeEvent()
     {
         var col = _fixture.GetCollection<BsonDocument>("bulk_cs");
 
-        using var cursor = col.Watch(RawPipeline());
+        using var cursor = await col.WatchAsync(RawPipeline());
 
         await col.BulkWriteAsync(new[]
         {
             new InsertOneModel<BsonDocument>(new BsonDocument { { "_id", "bk1" }, { "name", "BulkInsert" } })
         });
 
-        var hasEvents = cursor.MoveNext();
-        Assert.True(hasEvents);
-        var evt = cursor.Current.First();
-        Assert.Equal("insert", evt["operationType"].AsString);
+        var events = await ChangeStreamHelper.WaitForEventsAsync(cursor, 1);
+        Assert.Single(events);
+        Assert.Equal("insert", events[0]["operationType"].AsString);
     }
 
     #endregion
