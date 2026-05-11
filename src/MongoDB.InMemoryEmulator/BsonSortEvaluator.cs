@@ -28,6 +28,16 @@ internal static class BsonSortEvaluator
         foreach (var element in sort)
         {
             var field = element.Name;
+
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/sort/
+            //   "{ $meta: 'textScore' }" sort expression — treat as descending (highest score first).
+            //   Since we don't compute real text scores, sort by constant (no-op for ordering).
+            if (element.Value.IsBsonDocument)
+            {
+                // $meta sort — skip (text score is always 0.0 in this emulator)
+                continue;
+            }
+
             var direction = element.Value.AsInt32; // 1 = ascending, -1 = descending
 
             if (ordered == null)

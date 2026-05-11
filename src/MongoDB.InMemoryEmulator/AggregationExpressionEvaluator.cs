@@ -101,9 +101,9 @@ internal static class AggregationExpressionEvaluator
             "$multiply" => EvalMultiply(doc, args, variables),
             "$divide" => EvalDivide(doc, args, variables),
             "$mod" => EvalMod(doc, args, variables),
-            "$abs" => EvalUnaryMath(doc, args, variables, Math.Abs),
-            "$ceil" => EvalUnaryMath(doc, args, variables, Math.Ceiling),
-            "$floor" => EvalUnaryMath(doc, args, variables, Math.Floor),
+            "$abs" => EvalUnaryMathTypePreserving(doc, args, variables, Math.Abs),
+            "$ceil" => EvalUnaryMathTypePreserving(doc, args, variables, Math.Ceiling),
+            "$floor" => EvalUnaryMathTypePreserving(doc, args, variables, Math.Floor),
             "$round" => EvalRound(doc, args, variables),
             "$trunc" => EvalTrunc(doc, args, variables),
             "$pow" => EvalBinaryMath(doc, args, variables, Math.Pow),
@@ -467,6 +467,28 @@ internal static class AggregationExpressionEvaluator
         return new BsonDouble(fn(val.ToDouble()));
     }
 
+    /// <summary>
+    /// Evaluates a unary math operator that preserves the input numeric type.
+    /// Used for $abs, $ceil, $floor, $trunc.
+    /// </summary>
+    /// <remarks>
+    /// Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/abs/
+    ///   "Returns a value with the same type as the input value."
+    /// </remarks>
+    private static BsonValue EvalUnaryMathTypePreserving(BsonDocument doc, BsonValue args, BsonDocument? variables, Func<double, double> fn)
+    {
+        var val = Evaluate(doc, args is BsonArray a ? a[0] : args, variables);
+        if (val == BsonNull.Value) return BsonNull.Value;
+        var result = fn(val.ToDouble());
+        return val.BsonType switch
+        {
+            BsonType.Int32 => new BsonInt32((int)result),
+            BsonType.Int64 => new BsonInt64((long)result),
+            BsonType.Decimal128 => new BsonDecimal128((Decimal128)(decimal)result),
+            _ => new BsonDouble(result)
+        };
+    }
+
     private static BsonValue EvalBinaryMath(BsonDocument doc, BsonValue args, BsonDocument? variables, Func<double, double, double> fn)
     {
         var arr = EvalArray(doc, args, variables);
@@ -479,11 +501,38 @@ internal static class AggregationExpressionEvaluator
         var arr = EvalArray(doc, args, variables);
         // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/round/
         //   "If the argument resolves to a value of null or refers to a missing field, $round returns null."
+        //   "$round returns a value with the same type as the input value."
         if (arr[0] == BsonNull.Value) return BsonNull.Value;
-        var val = arr[0].ToDouble();
         int places = arr.Count > 1 ? arr[1].ToInt32() : 0;
+
+        var input = arr[0];
+        if (input.BsonType == BsonType.Int32)
+        {
+            if (places >= 0) return input;
+            double factor = Math.Pow(10, places);
+            return new BsonInt32((int)(Math.Round(input.AsInt32 * factor, MidpointRounding.ToEven) / factor));
+        }
+        if (input.BsonType == BsonType.Int64)
+        {
+            if (places >= 0) return input;
+            double factor = Math.Pow(10, places);
+            return new BsonInt64((long)(Math.Round(input.AsInt64 * factor, MidpointRounding.ToEven) / factor));
+        }
+        if (input.BsonType == BsonType.Decimal128)
+        {
+            var dec = input.AsDecimal;
+            if (places >= 0)
+                return new BsonDecimal128(Math.Round(dec, places, MidpointRounding.ToEven));
+            var factor = (decimal)Math.Pow(10, places);
+            return new BsonDecimal128(Math.Round(dec * factor, MidpointRounding.ToEven) / factor);
+        }
+
         //   "Rounds using the IEEE 754 round-to-even rule."
-        return new BsonDouble(Math.Round(val, places, MidpointRounding.ToEven));
+        var val = input.ToDouble();
+        if (places >= 0)
+            return new BsonDouble(Math.Round(val, places, MidpointRounding.ToEven));
+        double f = Math.Pow(10, places);
+        return new BsonDouble(Math.Round(val * f, MidpointRounding.ToEven) / f);
     }
 
     private static BsonValue EvalTrunc(BsonDocument doc, BsonValue args, BsonDocument? variables)
@@ -491,11 +540,33 @@ internal static class AggregationExpressionEvaluator
         var arr = EvalArray(doc, args, variables);
         // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/trunc/
         //   "If the argument resolves to a value of null or refers to a missing field, $trunc returns null."
+        //   "$trunc returns a value with the same type as the input value."
         if (arr[0] == BsonNull.Value) return BsonNull.Value;
-        var val = arr[0].ToDouble();
         int places = arr.Count > 1 ? arr[1].ToInt32() : 0;
-        double factor = Math.Pow(10, places);
-        return new BsonDouble(Math.Truncate(val * factor) / factor);
+
+        var input = arr[0];
+        if (input.BsonType == BsonType.Int32)
+        {
+            if (places >= 0) return input;
+            double factor = Math.Pow(10, places);
+            return new BsonInt32((int)(Math.Truncate(input.AsInt32 * factor) / factor));
+        }
+        if (input.BsonType == BsonType.Int64)
+        {
+            if (places >= 0) return input;
+            double factor = Math.Pow(10, places);
+            return new BsonInt64((long)(Math.Truncate(input.AsInt64 * factor) / factor));
+        }
+        if (input.BsonType == BsonType.Decimal128)
+        {
+            var dec = input.AsDecimal;
+            var factor = (decimal)Math.Pow(10, places);
+            return new BsonDecimal128(Math.Truncate(dec * factor) / factor);
+        }
+
+        var val = input.ToDouble();
+        double f = Math.Pow(10, places);
+        return new BsonDouble(Math.Truncate(val * f) / f);
     }
 
     #endregion

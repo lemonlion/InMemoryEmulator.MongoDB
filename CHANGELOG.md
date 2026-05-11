@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.43] - 2025-07-11
+
+### Fixed
+- `$meta` sort expressions (e.g. `{$meta: "textScore"}`) no longer crash with InvalidCastException — they are gracefully skipped
+- `$abs`, `$ceil`, `$floor` now preserve input numeric type (Int32/Int64/Decimal128) instead of always returning Double
+- `$trunc` now preserves input numeric type instead of always returning Double
+- `$round` now preserves input numeric type instead of always returning Double
+
+### Added
+- 15 new integration tests covering all fixes
+
 ## [0.11.42] - 2025-07-11
 
 ### Fixed
