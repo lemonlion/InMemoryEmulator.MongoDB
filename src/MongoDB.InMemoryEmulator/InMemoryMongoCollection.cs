@@ -1214,18 +1214,22 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
             }
             // Ref: https://www.mongodb.com/docs/drivers/csharp/current/fundamentals/crud/write-operations/bulk-write/
             //   "BulkWrite always throws MongoBulkWriteException on failure, for both ordered and unordered mode."
-            catch (MongoWriteException ex) when (!isOrdered)
+            catch (Exception ex) when (!isOrdered && ex is MongoWriteException or MongoCommandException)
             {
                 // Ref: https://www.mongodb.com/docs/manual/reference/method/db.collection.bulkWrite/
                 //   "unordered operations that result in errors will still report the errors."
-                errors.Add(MongoErrors.CreateBulkWriteError(i, ServerErrorCategory.DuplicateKey, 11000, ex.Message));
+                var code = ex is MongoWriteException mwe ? mwe.WriteError.Code : 2;
+                var category = ex is MongoWriteException mwe2 ? mwe2.WriteError.Category : ServerErrorCategory.Uncategorized;
+                errors.Add(MongoErrors.CreateBulkWriteError(i, category, code, ex.Message));
             }
             catch (Exception ex) when (isOrdered && ex is MongoWriteException or MongoCommandException)
             {
                 // Ref: https://www.mongodb.com/docs/drivers/csharp/current/fundamentals/crud/write-operations/bulk-write/
                 //   "If an error occurs during an ordered bulk operation, the driver throws a
                 //    MongoBulkWriteException and does not execute the remaining operations."
-                errors.Add(MongoErrors.CreateBulkWriteError(i, ServerErrorCategory.DuplicateKey, 11000, ex.Message));
+                var code = ex is MongoWriteException mwe ? mwe.WriteError.Code : 2;
+                var category = ex is MongoWriteException mwe2 ? mwe2.WriteError.Category : ServerErrorCategory.Uncategorized;
+                errors.Add(MongoErrors.CreateBulkWriteError(i, category, code, ex.Message));
                 break; // ordered mode: stop at first error
             }
         }
@@ -1545,14 +1549,20 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
     private void PublishChangeEvent(ChangeStreamOperationType opType, BsonDocument doc, BsonDocument? beforeChange = null)
     {
         var client = (Database as InMemoryMongoDatabase)?.Client as InMemoryMongoClient;
+        // Ref: https://www.mongodb.com/docs/manual/reference/change-events/delete/
+        //   For delete events, fullDocument is omitted and fullDocumentBeforeChange holds the pre-delete state.
+        var fullDoc = opType == ChangeStreamOperationType.Delete ? null : doc.DeepClone().AsBsonDocument;
+        var fullBefore = opType == ChangeStreamOperationType.Delete
+            ? doc.DeepClone().AsBsonDocument
+            : beforeChange?.DeepClone().AsBsonDocument;
         client?.ChangeNotifier.Publish(new ChangeEvent
         {
             OperationType = opType,
             DatabaseName = CollectionNamespace.DatabaseNamespace.DatabaseName,
             CollectionName = CollectionNamespace.CollectionName,
             DocumentKey = new BsonDocument("_id", doc.GetValue("_id", BsonNull.Value)),
-            FullDocument = doc.DeepClone().AsBsonDocument,
-            FullDocumentBeforeChange = beforeChange?.DeepClone().AsBsonDocument,
+            FullDocument = fullDoc,
+            FullDocumentBeforeChange = fullBefore,
         });
     }
 

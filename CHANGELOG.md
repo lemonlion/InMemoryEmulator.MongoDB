@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.48] - 2025-07-11
+
+### Fixed
+- Delete change stream events now correctly set `FullDocument` to null and `FullDocumentBeforeChange` to the pre-deletion document (was reversed)
+- BulkWrite in unordered mode now catches `MongoCommandException` in addition to `MongoWriteException`, and extracts the actual error code/category instead of hardcoding DuplicateKey
+- `$indexOfArray` now throws an error when `start` or `end` is a negative integer (was returning -1)
+
+### Added
+- 6 new integration tests covering all fixes
+
 ## [0.11.46] - 2025-07-11
 
 ### Fixed

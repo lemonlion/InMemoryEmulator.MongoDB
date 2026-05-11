@@ -1217,7 +1217,14 @@ internal static class AggregationExpressionEvaluator
         int start = arr.Count > 2 ? (int)Evaluate(doc, arr[2], variables).ToInt64() : 0;
         int end = arr.Count > 3 ? (int)Evaluate(doc, arr[3], variables).ToInt64() : array.Count;
 
-        if (start < 0 || start > array.Count) return new BsonInt32(-1);
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/indexOfArray/
+        //   "If <start> or <end> is a negative integer, $indexOfArray returns an error."
+        if (start < 0)
+            throw MongoErrors.BadValue("$indexOfArray: starting index must be non-negative");
+        if (end < 0)
+            throw MongoErrors.BadValue("$indexOfArray: ending index must be non-negative");
+
+        if (start > array.Count) return new BsonInt32(-1);
         if (end > array.Count) end = array.Count;
 
         for (int i = start; i < end; i++)
