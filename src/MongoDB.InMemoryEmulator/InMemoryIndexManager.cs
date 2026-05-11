@@ -429,7 +429,10 @@ public class InMemoryIndexManager<TDocument> : IMongoIndexManager<TDocument>
         if (a.Count != b.Count) return false;
         for (int i = 0; i < a.Count; i++)
         {
-            if (!a[i].Equals(b[i]))
+            // Ref: https://www.mongodb.com/docs/manual/core/index-unique/
+            //   MongoDB uses cross-type numeric comparison for index uniqueness
+            //   (e.g., 5 (Int32), 5.0 (Double), 5L (Int64) are all equal).
+            if (BsonValueComparer.Instance.Compare(a[i], b[i]) != 0)
                 return false;
         }
         return true;

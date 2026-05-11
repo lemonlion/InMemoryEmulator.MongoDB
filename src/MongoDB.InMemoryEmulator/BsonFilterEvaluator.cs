@@ -197,9 +197,11 @@ internal static class BsonFilterEvaluator
                           //   "{ tags: { $all: [/^ssl/] } }" — regex elements perform regex matching.
                           if (required is BsonRegularExpression regex)
                               return MatchesRegex(fieldValue, regex);
+                          // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/all/
+                          //   MongoDB uses cross-type numeric comparison (5 == 5.0 == 5L).
                           if (fieldValue is BsonArray allArr)
-                              return allArr.Any(el => el.Equals(required));
-                          return fieldValue.Equals(required);
+                              return allArr.Any(el => BsonValueComparer.Instance.Compare(el, required) == 0);
+                          return BsonValueComparer.Instance.Compare(fieldValue, required) == 0;
                       }),
 
             // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/elemMatch/

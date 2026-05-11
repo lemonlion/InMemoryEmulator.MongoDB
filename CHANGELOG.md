@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.58] - 2025-07-11
+
+### Fixed
+- Unique index enforcement now uses cross-type numeric comparison (`5` Int32, `5.0` Double, `5L` Int64 are treated as equal)
+- `` query operator now uses cross-type numeric comparison for array element matching
+
+### Added
+- 5 new integration tests covering all fixes
+
 ## [0.11.57] - 2025-07-11
 
 ### Fixed
