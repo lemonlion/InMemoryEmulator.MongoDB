@@ -19,11 +19,24 @@ internal sealed class BsonValueComparer : IEqualityComparer<BsonValue>, ICompare
     {
         if (x is null && y is null) return true;
         if (x is null || y is null) return false;
+        // Ref: https://www.mongodb.com/docs/manual/reference/bson-type-comparison-order/
+        //   Numbers (ints, longs, doubles, decimals) compare cross-type by value.
+        if (IsNumeric(x) && IsNumeric(y))
+            return x.CompareTo(y) == 0;
         return x.Equals(y);
     }
 
     public int GetHashCode(BsonValue obj)
     {
+        // Numeric types that represent the same mathematical value must have the same hash code.
+        if (IsNumeric(obj))
+        {
+            var d = obj.ToDouble();
+            // For integer values, normalize to long hash to ensure Int32/Int64/Double/Decimal128 match
+            if (d == Math.Floor(d) && d >= long.MinValue && d <= long.MaxValue && !double.IsNaN(d))
+                return ((long)d).GetHashCode();
+            return d.GetHashCode();
+        }
         return obj.GetHashCode();
     }
 
@@ -33,5 +46,10 @@ internal sealed class BsonValueComparer : IEqualityComparer<BsonValue>, ICompare
         if (x is null) return -1;
         if (y is null) return 1;
         return x.CompareTo(y);
+    }
+
+    private static bool IsNumeric(BsonValue val)
+    {
+        return val.BsonType is BsonType.Int32 or BsonType.Int64 or BsonType.Double or BsonType.Decimal128;
     }
 }

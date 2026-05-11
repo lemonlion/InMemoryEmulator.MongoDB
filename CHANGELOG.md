@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.53] - 2025-07-11
+
+### Fixed
+- Cross-type numeric equality in `BsonValueComparer` — `BsonInt32(5)`, `BsonDouble(5.0)`, `BsonInt64(5)` now correctly treated as equal in hash-based operations
+- `$in` aggregation expression now uses value-based comparison (cross-type numeric equality)
+- `$addToSet` in `$group` now correctly deduplicates cross-type numeric values
+- `$setUnion`, `$setIntersection`, `$setDifference`, `$setEquals`, `$setIsSubset` now handle cross-type numeric equality
+- `$dateToString` `%Z` format now produces `+0000` instead of `+00:00` (no colon separator)
+- `$push` in `$group` no longer leaks `$$REMOVE` sentinel values into results
+
+### Added
+- 7 new integration tests covering all fixes
+
 ## [0.11.52] - 2025-07-11
 
 ### Fixed

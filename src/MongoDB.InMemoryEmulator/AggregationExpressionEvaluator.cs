@@ -987,7 +987,9 @@ internal static class AggregationExpressionEvaluator
         if (!arr[1].IsBsonArray)
             throw MongoErrors.BadValue($"$in requires an array as a second argument, found: {arr[1].BsonType}");
         var array = arr[1].AsBsonArray;
-        return (BsonBoolean)array.Any(x => x.Equals(value));
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/in/
+        //   MongoDB uses value-based comparison (cross-type numeric equality).
+        return (BsonBoolean)array.Any(x => BsonValueComparer.Instance.Equals(x, value));
     }
 
     private static BsonValue EvalFilter(BsonDocument doc, BsonValue args, BsonDocument? variables)
@@ -1548,6 +1550,10 @@ internal static class AggregationExpressionEvaluator
         if (date == BsonNull.Value) return spec.Contains("onNull") ? Evaluate(doc, spec["onNull"], variables) : BsonNull.Value;
         var format = spec.GetValue("format", "%Y-%m-%dT%H:%M:%S.%LZ").AsString;
         var dt = date.ToUniversalTime();
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/dateToString/
+        //   "%Z: The minute offset from UTC as a number. For example, if the offset is +530, the return string will be +0530."
+        //   MongoDB outputs timezone offset without colon separator (e.g., +0000 not +00:00).
+        var hasPercentZ = format.Contains("%Z");
         // Convert MongoDB format to .NET format
         var netFormat = format
             .Replace("%Y", "yyyy").Replace("%m", "MM").Replace("%d", "dd")
@@ -1558,7 +1564,15 @@ internal static class AggregationExpressionEvaluator
         //   .NET has no built-in single format specifier for day-of-year, so we handle it manually.
         if (netFormat.Contains("%j"))
             netFormat = netFormat.Replace("%j", dt.DayOfYear.ToString("D3"));
-        return new BsonString(dt.ToString(netFormat, CultureInfo.InvariantCulture));
+        var result = dt.ToString(netFormat, CultureInfo.InvariantCulture);
+        // Remove colon from timezone offset to match MongoDB format (+00:00 → +0000)
+        if (hasPercentZ)
+        {
+            var idx = result.LastIndexOf(':');
+            if (idx >= 3 && (result[idx - 3] == '+' || result[idx - 3] == '-'))
+                result = result.Remove(idx, 1);
+        }
+        return new BsonString(result);
     }
 
     private static BsonValue EvalDateFromString(BsonDocument doc, BsonValue args, BsonDocument? variables)
