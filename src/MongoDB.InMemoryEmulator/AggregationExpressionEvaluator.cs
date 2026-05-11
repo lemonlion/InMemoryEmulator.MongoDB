@@ -216,11 +216,33 @@ internal static class AggregationExpressionEvaluator
             "$millisecond" => EvalDatePart(doc, args, variables, d => d.Millisecond),
             "$dayOfWeek" => EvalDatePart(doc, args, variables, d => (int)d.DayOfWeek + 1),
             "$dayOfYear" => EvalDatePart(doc, args, variables, d => d.DayOfYear),
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/week/
+            //   "Returns the week of the year for a date as a number between 0 and 53."
+            //   "Weeks begin on Sundays, and week 1 begins with the first Sunday of the year."
+            "$week" => EvalDatePart(doc, args, variables, d =>
+            {
+                // Days preceding the first Sunday of the year are in week 0.
+                var jan1 = new DateTime(d.Year, 1, 1);
+                var firstSunday = jan1.AddDays((7 - (int)jan1.DayOfWeek) % 7);
+                if (d < firstSunday) return 0;
+                return (int)((d - firstSunday).TotalDays / 7) + 1;
+            }),
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/isoWeek/
+            //   "Returns the week number in ISO 8601 format, ranging from 1 to 53."
+            "$isoWeek" => EvalDatePart(doc, args, variables, d =>
+                System.Globalization.ISOWeek.GetWeekOfYear(d)),
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/isoWeekYear/
+            //   "Returns the year number in ISO 8601 format."
+            "$isoWeekYear" => EvalDatePart(doc, args, variables, d =>
+                System.Globalization.ISOWeek.GetYear(d)),
             "$dateToString" => EvalDateToString(doc, args, variables),
             "$dateFromString" => EvalDateFromString(doc, args, variables),
             "$dateAdd" => EvalDateAdd(doc, args, variables),
             "$dateSubtract" => EvalDateSubtract(doc, args, variables),
             "$dateDiff" => EvalDateDiff(doc, args, variables),
+            "$dateTrunc" => EvalDateTrunc(doc, args, variables),
+            "$dateFromParts" => EvalDateFromParts(doc, args, variables),
+            "$dateToParts" => EvalDateToParts(doc, args, variables),
 
             // Object
             "$mergeObjects" => EvalMergeObjects(doc, args, variables),
@@ -232,6 +254,16 @@ internal static class AggregationExpressionEvaluator
 
             // Let
             "$let" => EvalLet(doc, args, variables),
+
+            // Bitwise
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/bitAnd/
+            "$bitAnd" => EvalBitwiseAggregate(doc, args, variables, (a, b) => a & b),
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/bitOr/
+            "$bitOr" => EvalBitwiseAggregate(doc, args, variables, (a, b) => a | b),
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/bitXor/
+            "$bitXor" => EvalBitwiseAggregate(doc, args, variables, (a, b) => a ^ b),
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/bitNot/
+            "$bitNot" => EvalBitNot(doc, args, variables),
 
             // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/binarySize/
             //   "Returns the size in bytes of a given string or binary data value."
@@ -1460,7 +1492,10 @@ internal static class AggregationExpressionEvaluator
             "hour" => (long)diff.TotalHours,
             "day" => (long)diff.TotalDays,
             "week" => (long)diff.TotalDays / 7,
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/dateDiff/
+            //   unit supports "quarter"
             "month" => (end.Year - start.Year) * 12 + (end.Month - start.Month),
+            "quarter" => ((end.Year - start.Year) * 12 + (end.Month - start.Month)) / 3,
             "year" => end.Year - start.Year,
             _ => throw MongoErrors.BadValue($"Unknown date unit: {unit}")
         };
@@ -1478,9 +1513,213 @@ internal static class AggregationExpressionEvaluator
             "day" => dt.AddDays(amount),
             "week" => dt.AddDays(amount * 7),
             "month" => dt.AddMonths((int)amount),
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/dateAdd/
+            //   unit supports "quarter" (1 quarter = 3 months)
+            "quarter" => dt.AddMonths((int)amount * 3),
             "year" => dt.AddYears((int)amount),
             _ => throw MongoErrors.BadValue($"Unknown date unit: {unit}")
         };
+    }
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/dateTrunc/
+    //   "Truncates a date."
+    private static BsonValue EvalDateTrunc(BsonDocument doc, BsonValue args, BsonDocument? variables)
+    {
+        var spec = args.AsBsonDocument;
+        var dateVal = Evaluate(doc, spec["date"], variables);
+        if (dateVal == BsonNull.Value) return BsonNull.Value;
+        var dt = dateVal.ToUniversalTime();
+        var unit = spec["unit"].AsString;
+        var binSize = spec.Contains("binSize") ? (int)Evaluate(doc, spec["binSize"], variables).ToInt64() : 1;
+
+        // Reference point for binning: 2000-01-01T00:00:00Z
+        var refDate = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        DateTime truncated;
+        switch (unit)
+        {
+            case "year":
+                if (binSize == 1) { truncated = new DateTime(dt.Year, 1, 1, 0, 0, 0, DateTimeKind.Utc); }
+                else
+                {
+                    int yearsSinceRef = dt.Year - refDate.Year;
+                    int binStart = yearsSinceRef / binSize * binSize;
+                    truncated = new DateTime(refDate.Year + binStart, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+                }
+                break;
+            case "quarter":
+                if (binSize == 1)
+                {
+                    int qMonth = ((dt.Month - 1) / 3) * 3 + 1;
+                    truncated = new DateTime(dt.Year, qMonth, 1, 0, 0, 0, DateTimeKind.Utc);
+                }
+                else
+                {
+                    int totalQuarters = (dt.Year - refDate.Year) * 4 + (dt.Month - 1) / 3;
+                    int binStart = totalQuarters / binSize * binSize;
+                    int baseYear = refDate.Year + binStart / 4;
+                    int baseMonth = (binStart % 4) * 3 + 1;
+                    truncated = new DateTime(baseYear, baseMonth, 1, 0, 0, 0, DateTimeKind.Utc);
+                }
+                break;
+            case "month":
+                if (binSize == 1) { truncated = new DateTime(dt.Year, dt.Month, 1, 0, 0, 0, DateTimeKind.Utc); }
+                else
+                {
+                    int totalMonths = (dt.Year - refDate.Year) * 12 + (dt.Month - 1);
+                    int binStart = totalMonths / binSize * binSize;
+                    int baseYear = refDate.Year + binStart / 12;
+                    int baseMonth = binStart % 12 + 1;
+                    truncated = new DateTime(baseYear, baseMonth, 1, 0, 0, 0, DateTimeKind.Utc);
+                }
+                break;
+            case "week":
+                var startOfWeekStr = spec.GetValue("startOfWeek", "sunday").AsString.ToLowerInvariant();
+                var dow = startOfWeekStr switch
+                {
+                    "monday" or "mon" => DayOfWeek.Monday,
+                    "tuesday" or "tue" => DayOfWeek.Tuesday,
+                    "wednesday" or "wed" => DayOfWeek.Wednesday,
+                    "thursday" or "thu" => DayOfWeek.Thursday,
+                    "friday" or "fri" => DayOfWeek.Friday,
+                    "saturday" or "sat" => DayOfWeek.Saturday,
+                    _ => DayOfWeek.Sunday
+                };
+                int daysSinceStart = ((int)dt.DayOfWeek - (int)dow + 7) % 7;
+                var weekStart = dt.Date.AddDays(-daysSinceStart);
+                if (binSize == 1) { truncated = weekStart; }
+                else
+                {
+                    // Find reference Sunday (or startOfWeek) >= 2000-01-01
+                    var refWeekStart = refDate;
+                    int refDaysSince = ((int)refWeekStart.DayOfWeek - (int)dow + 7) % 7;
+                    if (refDaysSince > 0) refWeekStart = refWeekStart.AddDays(7 - refDaysSince);
+                    long totalWeeks = (long)(weekStart - refWeekStart).TotalDays / 7;
+                    long binStart = totalWeeks / binSize * binSize;
+                    truncated = refWeekStart.AddDays(binStart * 7);
+                }
+                break;
+            case "day":
+                if (binSize == 1) { truncated = dt.Date; }
+                else
+                {
+                    long totalDays = (long)(dt.Date - refDate).TotalDays;
+                    long binStart = totalDays / binSize * binSize;
+                    truncated = refDate.AddDays(binStart);
+                }
+                break;
+            case "hour":
+                if (binSize == 1) { truncated = new DateTime(dt.Year, dt.Month, dt.Day, dt.Hour, 0, 0, DateTimeKind.Utc); }
+                else
+                {
+                    long totalHours = (long)(dt - refDate).TotalHours;
+                    long binStart = totalHours / binSize * binSize;
+                    truncated = refDate.AddHours(binStart);
+                }
+                break;
+            case "minute":
+                if (binSize == 1) { truncated = new DateTime(dt.Year, dt.Month, dt.Day, dt.Hour, dt.Minute, 0, DateTimeKind.Utc); }
+                else
+                {
+                    long totalMinutes = (long)(dt - refDate).TotalMinutes;
+                    long binStart = totalMinutes / binSize * binSize;
+                    truncated = refDate.AddMinutes(binStart);
+                }
+                break;
+            case "second":
+                if (binSize == 1) { truncated = new DateTime(dt.Year, dt.Month, dt.Day, dt.Hour, dt.Minute, dt.Second, DateTimeKind.Utc); }
+                else
+                {
+                    long totalSeconds = (long)(dt - refDate).TotalSeconds;
+                    long binStart = totalSeconds / binSize * binSize;
+                    truncated = refDate.AddSeconds(binStart);
+                }
+                break;
+            default:
+                throw MongoErrors.BadValue($"Unknown date unit: {unit}");
+        }
+        return new BsonDateTime(truncated);
+    }
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/dateFromParts/
+    //   "Constructs and returns a Date object given the date's constituent properties."
+    private static BsonValue EvalDateFromParts(BsonDocument doc, BsonValue args, BsonDocument? variables)
+    {
+        var spec = args.AsBsonDocument;
+
+        if (spec.Contains("isoWeekYear"))
+        {
+            // ISO week date form
+            var isoWeekYear = (int)Evaluate(doc, spec["isoWeekYear"], variables).ToInt64();
+            var isoWeek = spec.Contains("isoWeek") ? (int)Evaluate(doc, spec["isoWeek"], variables).ToInt64() : 1;
+            var isoDayOfWeek = spec.Contains("isoDayOfWeek") ? (int)Evaluate(doc, spec["isoDayOfWeek"], variables).ToInt64() : 1;
+            var hour = spec.Contains("hour") ? (int)Evaluate(doc, spec["hour"], variables).ToInt64() : 0;
+            var minute = spec.Contains("minute") ? (int)Evaluate(doc, spec["minute"], variables).ToInt64() : 0;
+            var second = spec.Contains("second") ? (int)Evaluate(doc, spec["second"], variables).ToInt64() : 0;
+            var ms = spec.Contains("millisecond") ? (int)Evaluate(doc, spec["millisecond"], variables).ToInt64() : 0;
+
+            // Convert ISO week date to Gregorian
+            var dt = System.Globalization.ISOWeek.ToDateTime(isoWeekYear, isoWeek, (DayOfWeek)(isoDayOfWeek % 7));
+            dt = dt.AddHours(hour).AddMinutes(minute).AddSeconds(second).AddMilliseconds(ms);
+            return new BsonDateTime(DateTime.SpecifyKind(dt, DateTimeKind.Utc));
+        }
+        else
+        {
+            // Calendar date form
+            var year = (int)Evaluate(doc, spec["year"], variables).ToInt64();
+            var month = spec.Contains("month") ? (int)Evaluate(doc, spec["month"], variables).ToInt64() : 1;
+            var day = spec.Contains("day") ? (int)Evaluate(doc, spec["day"], variables).ToInt64() : 1;
+            var hour = spec.Contains("hour") ? (int)Evaluate(doc, spec["hour"], variables).ToInt64() : 0;
+            var minute = spec.Contains("minute") ? (int)Evaluate(doc, spec["minute"], variables).ToInt64() : 0;
+            var second = spec.Contains("second") ? (int)Evaluate(doc, spec["second"], variables).ToInt64() : 0;
+            var ms = spec.Contains("millisecond") ? (int)Evaluate(doc, spec["millisecond"], variables).ToInt64() : 0;
+
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/dateFromParts/
+            //   "If the number specified is outside this range, $dateFromParts incorporates the difference"
+            // Handle overflow: start from year-01-01 and add offsets
+            var dt = new DateTime(year, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            dt = dt.AddMonths(month - 1).AddDays(day - 1)
+                   .AddHours(hour).AddMinutes(minute).AddSeconds(second).AddMilliseconds(ms);
+            return new BsonDateTime(dt);
+        }
+    }
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/dateToParts/
+    //   "Returns a document that contains the constituent parts of a given Date value."
+    private static BsonValue EvalDateToParts(BsonDocument doc, BsonValue args, BsonDocument? variables)
+    {
+        var spec = args.AsBsonDocument;
+        var dateVal = Evaluate(doc, spec["date"], variables);
+        if (dateVal == BsonNull.Value) return BsonNull.Value;
+        var dt = dateVal.ToUniversalTime();
+        var iso8601 = spec.Contains("iso8601") && spec["iso8601"].AsBoolean;
+
+        if (iso8601)
+        {
+            return new BsonDocument
+            {
+                { "isoWeekYear", System.Globalization.ISOWeek.GetYear(dt) },
+                { "isoWeek", System.Globalization.ISOWeek.GetWeekOfYear(dt) },
+                { "isoDayOfWeek", (int)dt.DayOfWeek == 0 ? 7 : (int)dt.DayOfWeek },
+                { "hour", dt.Hour },
+                { "minute", dt.Minute },
+                { "second", dt.Second },
+                { "millisecond", dt.Millisecond }
+            };
+        }
+        else
+        {
+            return new BsonDocument
+            {
+                { "year", dt.Year },
+                { "month", dt.Month },
+                { "day", dt.Day },
+                { "hour", dt.Hour },
+                { "minute", dt.Minute },
+                { "second", dt.Second },
+                { "millisecond", dt.Millisecond }
+            };
+        }
     }
 
     #endregion
@@ -1546,6 +1785,31 @@ internal static class AggregationExpressionEvaluator
         foreach (var v in vars)
             newVars[v.Name] = Evaluate(doc, v.Value, variables);
         return Evaluate(doc, inExpr, newVars);
+    }
+
+    #endregion
+
+    #region Bitwise
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/bitAnd/
+    //   "Returns the result of a bitwise and operation on an array of int or long values."
+    private static BsonValue EvalBitwiseAggregate(BsonDocument doc, BsonValue args, BsonDocument? variables, Func<long, long, long> op)
+    {
+        var arr = EvalArray(doc, args, variables);
+        bool isLong = arr.Any(v => v.BsonType == BsonType.Int64);
+        long result = arr[0].ToInt64();
+        for (int i = 1; i < arr.Count; i++)
+            result = op(result, arr[i].ToInt64());
+        return isLong ? (BsonValue)new BsonInt64(result) : new BsonInt32((int)result);
+    }
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/bitNot/
+    //   "Returns the result of a bitwise not operation on a single argument."
+    private static BsonValue EvalBitNot(BsonDocument doc, BsonValue args, BsonDocument? variables)
+    {
+        var val = Evaluate(doc, args is BsonArray a ? a[0] : args, variables);
+        if (val.BsonType == BsonType.Int64) return new BsonInt64(~val.ToInt64());
+        return new BsonInt32(~val.ToInt32());
     }
 
     #endregion

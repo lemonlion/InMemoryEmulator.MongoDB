@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.38] - 2026-05-10
+
+### Fixed
+- `$dateDiff`, `$dateAdd`, `$dateSubtract` now support `"quarter"` unit — previously threw `Unknown date unit: quarter`
+
+### Added
+- `$dateTrunc` aggregation expression operator — truncates dates to specified unit boundaries with optional `binSize`, `startOfWeek` support
+- `$dateFromParts` aggregation expression operator — constructs dates from calendar parts or ISO week date parts
+- `$dateToParts` aggregation expression operator — decomposes dates into constituent parts (calendar or ISO 8601)
+- `$week` date extractor — returns Sunday-based week of year (0-53)
+- `$isoWeek` date extractor — returns ISO 8601 week number (1-53)
+- `$isoWeekYear` date extractor — returns ISO 8601 year number
+- Bitwise aggregation expression operators: `$bitAnd`, `$bitOr`, `$bitXor`, `$bitNot`
+- 21 new integration tests covering quarter unit bug, $dateTrunc, $dateFromParts, $dateToParts, $week/$isoWeek/$isoWeekYear, and bitwise operators
+
 ## [0.11.37] - 2026-05-10
 
 ### Fixed
