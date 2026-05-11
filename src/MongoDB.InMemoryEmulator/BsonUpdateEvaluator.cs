@@ -253,16 +253,34 @@ internal static class BsonUpdateEvaluator
             {
                 ApplyPositionalAction(doc, element.Name, ctx, (d, leaf) =>
                 {
-                    var current = d.Contains(leaf) ? d[leaf] : BsonNull.Value;
-                    if (current == BsonNull.Value || BsonValueComparer.Instance.Compare(element.Value, current) > 0)
+                    if (!d.Contains(leaf))
+                    {
                         d[leaf] = element.Value;
+                    }
+                    else
+                    {
+                        var current = d[leaf];
+                        if (BsonValueComparer.Instance.Compare(element.Value, current) > 0)
+                            d[leaf] = element.Value;
+                    }
                 });
             }
             else
             {
-                var current = ResolveFieldPath(doc, element.Name);
-                if (current == BsonNull.Value || BsonValueComparer.Instance.Compare(element.Value, current) > 0)
+                // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/max/
+                //   "If the field does not exist, the $max operator sets the field to the specified value."
+                //   If the field exists (even as null), only update if new value is greater.
+                var fieldExists = BsonFilterEvaluator.FieldExists(doc, element.Name);
+                if (!fieldExists)
+                {
                     SetFieldPath(doc, element.Name, element.Value);
+                }
+                else
+                {
+                    var current = ResolveFieldPath(doc, element.Name);
+                    if (BsonValueComparer.Instance.Compare(element.Value, current) > 0)
+                        SetFieldPath(doc, element.Name, element.Value);
+                }
             }
         }
     }

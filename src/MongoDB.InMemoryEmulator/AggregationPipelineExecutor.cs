@@ -758,8 +758,10 @@ internal static class AggregationPipelineExecutor
             {
                 // Scalar value — treat as single-element array
                 var clone = doc.DeepClone().AsBsonDocument;
+                // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/unwind/
+                //   For non-array (scalar) inputs, includeArrayIndex is null, not 0.
                 if (includeArrayIndex != null)
-                    clone[includeArrayIndex] = new BsonInt64(0);
+                    clone[includeArrayIndex] = BsonNull.Value;
                 yield return clone;
             }
             else if (preserveNullAndEmpty)
@@ -800,9 +802,15 @@ internal static class AggregationPipelineExecutor
 
         if (spec.Contains("pipeline"))
         {
-            // Pipeline form
+            // Pipeline form (may also include localField/foreignField for concise correlated syntax)
             var letVars = spec.GetValue("let", new BsonDocument()).AsBsonDocument;
             var pipeline = spec["pipeline"].AsBsonArray.Select(s => s.AsBsonDocument).ToList();
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/lookup/#correlated-subqueries-using-concise-syntax
+            //   MongoDB 5.0+ allows localField + foreignField + pipeline together.
+            //   "The match is performed before the pipeline is run."
+            var hasEqualityMatch = spec.Contains("localField") && spec.Contains("foreignField");
+            var localField = hasEqualityMatch ? spec["localField"].AsString : null;
+            var foreignField = hasEqualityMatch ? spec["foreignField"].AsString : null;
 
             foreach (var doc in input)
             {
@@ -811,7 +819,23 @@ internal static class AggregationPipelineExecutor
                     vars[letVar.Name] = AggregationExpressionEvaluator.Evaluate(doc, letVar.Value);
 
                 var subContext = context.WithVariables(vars);
-                var foreignInput = GetForeignDocs().Select(d => d.DeepClone().AsBsonDocument);
+                IEnumerable<BsonDocument> foreignInput = GetForeignDocs().Select(d => d.DeepClone().AsBsonDocument);
+
+                // Pre-filter by equality match if concise correlated syntax is used
+                if (hasEqualityMatch)
+                {
+                    var localValue = BsonFilterEvaluator.ResolveFieldPath(doc, localField!);
+                    foreignInput = foreignInput.Where(f =>
+                    {
+                        var fVal = BsonFilterEvaluator.ResolveFieldPath(f, foreignField!);
+                        if (localValue is BsonArray localArr)
+                            return localArr.Any(lv => BsonValueComparer.Instance.Equals(lv, fVal));
+                        if (fVal is BsonArray foreignArr)
+                            return foreignArr.Any(fv => BsonValueComparer.Instance.Equals(fv, localValue));
+                        return BsonValueComparer.Instance.Equals(localValue, fVal);
+                    });
+                }
+
                 var subResult = Execute(foreignInput, pipeline, subContext).ToList();
 
                 var clone = doc.DeepClone().AsBsonDocument;
