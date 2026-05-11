@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.42] - 2025-07-11
+
+### Fixed
+- `Find().Limit(0)` now correctly returns all documents — previously returned empty (0 means "no limit" per MongoDB spec)
+- `$dateFromString` now supports `format` parameter with MongoDB strftime-style specifiers (`%Y`, `%m`, `%d`, `%H`, `%M`, `%S`, `%L`)
+- `$dateFromString` now supports `timezone` parameter — interprets parsed dates in the specified timezone and converts to UTC
+
+### Added
+- 8 new integration tests covering all fixes
+
 ## [0.11.41] - 2025-07-11
 
 ### Fixed

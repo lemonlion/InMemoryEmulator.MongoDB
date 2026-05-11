@@ -1426,7 +1426,8 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
 
         // Ref: https://www.mongodb.com/docs/manual/reference/command/find/
         //   "limit: Optional. The maximum number of documents to return."
-        if (limit.HasValue)
+        //   "A limit value of 0 is equivalent to setting no limit."
+        if (limit.HasValue && limit.Value > 0)
             results = results.Take(limit.Value);
 
         return results.ToList();

@@ -1456,13 +1456,83 @@ internal static class AggregationExpressionEvaluator
             throw MongoErrors.BadValue($"$dateFromString requires a string as 'dateString', found: {dateString.BsonType}");
         try
         {
-            var dt = DateTime.Parse(dateString.AsString, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
+            DateTime dt;
+            if (spec.Contains("format"))
+            {
+                // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/dateFromString/
+                //   "format: Optional. The date format specification of the dateString.
+                //    format can be any expression that evaluates to a string literal,
+                //    containing 0 or more format specifiers."
+                var mongoFormat = Evaluate(doc, spec["format"], variables).AsString;
+                var dotnetFormat = ConvertMongoDateFormatToDotNet(mongoFormat);
+                dt = DateTime.ParseExact(dateString.AsString, dotnetFormat, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
+            }
+            else
+            {
+                dt = DateTime.Parse(dateString.AsString, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
+            }
+
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/dateFromString/
+            //   "timezone: Optional. The time zone to use to format the date."
+            //   If timezone is specified, the parsed date is interpreted in that timezone and converted to UTC.
+            if (spec.Contains("timezone"))
+            {
+                var tz = Evaluate(doc, spec["timezone"], variables).AsString;
+                var offset = ParseTimezoneOffset(tz);
+                dt = dt.Add(-offset); // Convert from local timezone to UTC
+            }
+
             return new BsonDateTime(dt);
         }
         catch
         {
             if (spec.Contains("onError")) return Evaluate(doc, spec["onError"], variables);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Converts MongoDB strftime-style format to .NET DateTime format.
+    /// </summary>
+    private static string ConvertMongoDateFormatToDotNet(string mongoFormat)
+    {
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/dateFromString/
+        //   MongoDB uses strftime-style format specifiers
+        return mongoFormat
+            .Replace("%Y", "yyyy")
+            .Replace("%m", "MM")
+            .Replace("%d", "dd")
+            .Replace("%H", "HH")
+            .Replace("%M", "mm")
+            .Replace("%S", "ss")
+            .Replace("%L", "fff")
+            .Replace("%j", "DDD")
+            .Replace("%w", "d")
+            .Replace("%U", "ww")
+            .Replace("%Z", "zzz")
+            .Replace("%z", "zzz")
+            .Replace("%%", "%");
+    }
+
+    /// <summary>
+    /// Parses a timezone string (e.g., "+05:00", "-08:00", "UTC") into a TimeSpan offset.
+    /// </summary>
+    private static TimeSpan ParseTimezoneOffset(string tz)
+    {
+        if (tz == "UTC" || tz == "GMT") return TimeSpan.Zero;
+        if (tz.StartsWith("+") || tz.StartsWith("-"))
+        {
+            return TimeSpan.Parse(tz.TrimStart('+'));
+        }
+        // Try as IANA timezone name
+        try
+        {
+            var tzi = TimeZoneInfo.FindSystemTimeZoneById(tz);
+            return tzi.BaseUtcOffset;
+        }
+        catch
+        {
+            return TimeSpan.Zero;
         }
     }
 
