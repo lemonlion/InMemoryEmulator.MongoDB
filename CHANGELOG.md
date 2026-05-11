@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.39] - 2026-05-10
+
+### Fixed
+- `$setField` with `$$REMOVE` value now correctly removes the field — previously leaked sentinel value into the document
+- `$bit` update on missing field now creates `Int64` when operand is `Int64` — previously always created `Int32`
+
+### Added
+- `$isoDayOfWeek` aggregation expression operator — returns ISO 8601 day of week (Monday=1, Sunday=7)
+- `$unsetField` aggregation expression operator — removes a field from a document (alias for `$setField` with `$$REMOVE`)
+- `$median` group accumulator — returns the 50th percentile value
+- `$percentile` group accumulator — returns an array of values at specified percentile points
+- 8 new integration tests covering all fixes and new operators
+
 ## [0.11.38] - 2026-05-10
 
 ### Fixed

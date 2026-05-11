@@ -367,6 +367,12 @@ internal static class AggregationPipelineExecutor
                     "$lastN" => ComputeLastN(groupDocs, accSpec),
                     "$maxN" => ComputeMaxN(groupDocs, accSpec),
                     "$minN" => ComputeMinN(groupDocs, accSpec),
+                    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/median/
+                    //   "Returns an approximation of the median, the 50th percentile."
+                    "$median" => ComputeMedian(groupDocs, accSpec),
+                    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/percentile/
+                    //   "Returns an array of the approximate percentile values."
+                    "$percentile" => ComputePercentile(groupDocs, accSpec),
                     // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/accumulator/
                     //   "Defines a custom accumulator function."
                     "$accumulator" => AggregationExpressionEvaluator.EvalAccumulator(accSpec, groupDocs, null),
@@ -567,6 +573,51 @@ internal static class AggregationPipelineExecutor
             .OrderBy(v => v, BsonValueComparer.Instance)
             .Take(n).ToList();
         return new BsonArray(values);
+    }
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/median/
+    //   "Returns an approximation of the median, the 50th percentile."
+    private static BsonValue ComputeMedian(List<BsonDocument> docs, BsonDocument accSpec)
+    {
+        var spec = accSpec["$median"].AsBsonDocument;
+        var input = spec["input"];
+        var values = docs.Select(d => AggregationExpressionEvaluator.Evaluate(d, input))
+            .Where(v => v != BsonNull.Value && v.IsNumeric)
+            .Select(v => v.ToDouble())
+            .OrderBy(v => v)
+            .ToList();
+        if (values.Count == 0) return BsonNull.Value;
+        return new BsonDouble(ComputePercentileValue(values, 0.5));
+    }
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/percentile/
+    //   "Returns an array of the approximate percentile values."
+    private static BsonValue ComputePercentile(List<BsonDocument> docs, BsonDocument accSpec)
+    {
+        var spec = accSpec["$percentile"].AsBsonDocument;
+        var input = spec["input"];
+        var percentiles = spec["p"].AsBsonArray;
+        var values = docs.Select(d => AggregationExpressionEvaluator.Evaluate(d, input))
+            .Where(v => v != BsonNull.Value && v.IsNumeric)
+            .Select(v => v.ToDouble())
+            .OrderBy(v => v)
+            .ToList();
+        if (values.Count == 0) return BsonNull.Value;
+        var result = new BsonArray();
+        foreach (var p in percentiles)
+            result.Add(new BsonDouble(ComputePercentileValue(values, p.ToDouble())));
+        return result;
+    }
+
+    private static double ComputePercentileValue(List<double> sorted, double p)
+    {
+        // Nearest-rank method (matches MongoDB approximate behavior)
+        double rank = p * (sorted.Count - 1);
+        int lower = (int)Math.Floor(rank);
+        int upper = (int)Math.Ceiling(rank);
+        if (lower == upper) return sorted[lower];
+        double fraction = rank - lower;
+        return sorted[lower] + fraction * (sorted[upper] - sorted[lower]);
     }
 
     #endregion

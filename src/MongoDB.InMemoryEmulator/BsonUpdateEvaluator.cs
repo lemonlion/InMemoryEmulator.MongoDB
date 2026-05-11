@@ -690,10 +690,13 @@ internal static class BsonUpdateEvaluator
             if (current != BsonNull.Value && !current.IsInt32 && !current.IsInt64)
                 throw MongoErrors.BadValue($"Cannot apply $bit to a value of non-numeric type {current.BsonType}");
             long currentVal = current.IsInt64 ? current.AsInt64 : current.IsInt32 ? current.AsInt32 : 0;
+            bool isMissing = current == BsonNull.Value;
 
             var bitOps = element.Value.AsBsonDocument;
+            bool anyOperandIsLong = false;
             foreach (var op in bitOps)
             {
+                if (op.Value.IsInt64) anyOperandIsLong = true;
                 long operand = op.Value.IsInt64 ? op.Value.AsInt64 : op.Value.AsInt32;
                 currentVal = op.Name switch
                 {
@@ -704,7 +707,9 @@ internal static class BsonUpdateEvaluator
                 };
             }
 
-            if (current.IsInt64)
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/bit/
+            //   Result type: if field exists, preserve its type; if missing, match the operand type.
+            if (current.IsInt64 || (isMissing && anyOperandIsLong))
                 SetFieldPath(doc, element.Name, new BsonInt64(currentVal));
             else
                 SetFieldPath(doc, element.Name, new BsonInt32((int)currentVal));

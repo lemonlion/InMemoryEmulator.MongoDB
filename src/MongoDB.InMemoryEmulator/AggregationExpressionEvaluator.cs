@@ -227,6 +227,10 @@ internal static class AggregationExpressionEvaluator
                 if (d < firstSunday) return 0;
                 return (int)((d - firstSunday).TotalDays / 7) + 1;
             }),
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/isoDayOfWeek/
+            //   "Returns the weekday number in ISO 8601 format, ranging from 1 (Monday) to 7 (Sunday)."
+            "$isoDayOfWeek" => EvalDatePart(doc, args, variables, d =>
+                d.DayOfWeek == DayOfWeek.Sunday ? 7 : (int)d.DayOfWeek),
             // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/isoWeek/
             //   "Returns the week number in ISO 8601 format, ranging from 1 to 53."
             "$isoWeek" => EvalDatePart(doc, args, variables, d =>
@@ -248,6 +252,9 @@ internal static class AggregationExpressionEvaluator
             "$mergeObjects" => EvalMergeObjects(doc, args, variables),
             "$getField" => EvalGetField(doc, args, variables),
             "$setField" => EvalSetField(doc, args, variables),
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/unsetField/
+            //   "$unsetField is an alias for $setField with value: $$REMOVE"
+            "$unsetField" => EvalUnsetField(doc, args, variables),
 
             // Literal
             "$literal" => args,
@@ -1767,7 +1774,25 @@ internal static class AggregationExpressionEvaluator
         if (inputVal == BsonNull.Value) return BsonNull.Value;
         var input = inputVal.AsBsonDocument.DeepClone().AsBsonDocument;
         var value = Evaluate(doc, spec["value"], variables);
-        input[field] = value;
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/setField/
+        //   "If the value resolves to $$REMOVE, the field is removed from the document."
+        if (IsRemove(value))
+            input.Remove(field);
+        else
+            input[field] = value;
+        return input;
+    }
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/unsetField/
+    //   "Removes a field from a document. Alias for $setField with value: $$REMOVE."
+    private static BsonValue EvalUnsetField(BsonDocument doc, BsonValue args, BsonDocument? variables)
+    {
+        var spec = args.AsBsonDocument;
+        var field = Evaluate(doc, spec["field"], variables).AsString;
+        var inputVal = Evaluate(doc, spec["input"], variables);
+        if (inputVal == BsonNull.Value) return BsonNull.Value;
+        var input = inputVal.AsBsonDocument.DeepClone().AsBsonDocument;
+        input.Remove(field);
         return input;
     }
 
