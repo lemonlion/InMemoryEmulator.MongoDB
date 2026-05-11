@@ -800,7 +800,12 @@ internal static class AggregationExpressionEvaluator
         var (regex, opts) = ExtractRegex(spec, variables);
         var m = Regex.Match(input.AsString, regex, ParseRegexOptions(opts));
         if (!m.Success) return BsonNull.Value;
-        return new BsonDocument { { "match", m.Value }, { "idx", m.Index }, { "captures", new BsonArray() } };
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/regexFind/
+        //   "captures: An array that contains the matching string for each identified capture group."
+        var captures = new BsonArray();
+        for (int i = 1; i < m.Groups.Count; i++)
+            captures.Add(m.Groups[i].Success ? (BsonValue)new BsonString(m.Groups[i].Value) : BsonNull.Value);
+        return new BsonDocument { { "match", m.Value }, { "idx", m.Index }, { "captures", captures } };
     }
 
     private static BsonValue EvalRegexFindAll(BsonDocument doc, BsonValue args, BsonDocument? variables)
@@ -816,7 +821,12 @@ internal static class AggregationExpressionEvaluator
         var matches = Regex.Matches(input.AsString, regex, ParseRegexOptions(opts));
         var result = new BsonArray();
         foreach (Match m in matches)
-            result.Add(new BsonDocument { { "match", m.Value }, { "idx", m.Index }, { "captures", new BsonArray() } });
+        {
+            var captures = new BsonArray();
+            for (int i = 1; i < m.Groups.Count; i++)
+                captures.Add(m.Groups[i].Success ? (BsonValue)new BsonString(m.Groups[i].Value) : BsonNull.Value);
+            result.Add(new BsonDocument { { "match", m.Value }, { "idx", m.Index }, { "captures", captures } });
+        }
         return result;
     }
 
