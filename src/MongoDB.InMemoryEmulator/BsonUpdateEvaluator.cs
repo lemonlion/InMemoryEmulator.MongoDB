@@ -1,4 +1,6 @@
 using MongoDB.Bson;
+using MongoDB.Driver;
+using MongoDB.Driver.Core.Connections;
 
 namespace MongoDB.InMemoryEmulator;
 
@@ -295,6 +297,17 @@ internal static class BsonUpdateEvaluator
         {
             var oldName = element.Name;
             var newName = element.Value.AsString;
+
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/rename/
+            //   "$rename does not work if these fields are in array elements."
+            //   MongoDB errors with "The source field for $rename may not be dynamic"
+            if (PathTraversesArray(doc, oldName) || PathTraversesArray(doc, newName))
+                throw new MongoWriteException(
+                    MongoErrors.SyntheticConnectionId,
+                    MongoErrors.CreateWriteError(ServerErrorCategory.Uncategorized, 2,
+                        $"The source field for $rename may not traverse an array element: {oldName}"),
+                    null, null);
+
             if (BsonFilterEvaluator.FieldExists(doc, oldName))
             {
                 var value = ResolveFieldPath(doc, oldName);
@@ -302,6 +315,36 @@ internal static class BsonUpdateEvaluator
                 SetFieldPath(doc, newName, value);
             }
         }
+    }
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/rename/
+    //   Checks if any intermediate segment of a dotted path is an array element.
+    private static bool PathTraversesArray(BsonDocument doc, string path)
+    {
+        var parts = path.Split('.');
+        BsonValue current = doc;
+        for (int i = 0; i < parts.Length - 1; i++)
+        {
+            if (current.IsBsonDocument)
+            {
+                var d = current.AsBsonDocument;
+                if (d.Contains(parts[i]))
+                    current = d[parts[i]];
+                else if (int.TryParse(parts[i], out _))
+                    return true; // numeric index on a document means array traversal intent
+                else
+                    return false;
+            }
+            else if (current.IsBsonArray)
+            {
+                return true;
+            }
+            else
+            {
+                return false;
+            }
+        }
+        return current.IsBsonArray;
     }
 
     // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/currentDate/
@@ -432,9 +475,15 @@ internal static class BsonUpdateEvaluator
             else if (sortSpec.IsBsonDocument)
             {
                 var sortDoc = sortSpec.AsBsonDocument;
-                var items2 = array.Select(x => x.AsBsonDocument).ToList();
-                var sortedDocs = BsonSortEvaluator.Apply(items2, sortDoc);
-                sorted = new BsonArray(sortedDocs);
+                // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/push/
+                //   Non-document elements are treated as having missing sort fields.
+                var items2 = array.Select(x => x.IsBsonDocument ? x.AsBsonDocument : new BsonDocument()).ToList();
+                var indexMap = Enumerable.Range(0, array.Count).ToList();
+                var paired = items2.Zip(indexMap, (doc, idx) => (doc, idx)).ToList();
+                var sortedPaired = BsonSortEvaluator.Apply(paired.Select(p => p.doc).ToList(), sortDoc);
+                // Rebuild using original values preserving non-doc elements
+                var sortedIndices = sortedPaired.Select(d => paired.First(p => ReferenceEquals(p.doc, d)).idx).ToList();
+                sorted = new BsonArray(sortedIndices.Select(i => array[i]));
             }
             else
             {

@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.57] - 2025-07-11
+
+### Fixed
+- `` with `` document specification no longer throws when array contains non-document elements (treats them as having missing sort fields)
+- `` now correctly throws an error when the field path traverses an array element, matching real MongoDB behavior
+
+### Added
+- 4 new integration tests covering all fixes
+
 ## [0.11.56] - 2025-07-11
 
 ### Fixed
