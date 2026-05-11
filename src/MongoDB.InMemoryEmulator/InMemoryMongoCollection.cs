@@ -162,9 +162,11 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
             {
                 // Ref: https://www.mongodb.com/docs/manual/reference/method/db.collection.insertMany/
                 //   "InsertMany errors are always wrapped in MongoBulkWriteException."
+                var errorCode = ex.WriteError?.Code ?? 11000;
+                var errorCategory = ex.WriteError?.Category ?? ServerErrorCategory.DuplicateKey;
                 var writeErrors = new List<BulkWriteError>
                 {
-                    MongoErrors.CreateBulkWriteError(i, ServerErrorCategory.DuplicateKey, 11000, ex.Message)
+                    MongoErrors.CreateBulkWriteError(i, errorCategory, errorCode, ex.Message)
                 };
                 throw new MongoBulkWriteException<TDocument>(
                     MongoErrors.SyntheticConnectionId,

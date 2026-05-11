@@ -1512,6 +1512,9 @@ internal static class AggregationExpressionEvaluator
     {
         var val = Evaluate(doc, args is BsonArray a ? a[0] : args, variables);
         if (val == BsonNull.Value) return BsonNull.Value;
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/toDate/
+        //   "$toDate is equivalent to { $convert: { input: <expression>, to: 'date' } }"
+        if (val.IsObjectId) return new BsonDateTime(val.AsObjectId.CreationTime);
         if (val.IsString) return new BsonDateTime(DateTime.Parse(val.AsString, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal));
         return new BsonDateTime(BsonUtils.ToDateTimeFromMillisecondsSinceEpoch(val.ToInt64()));
     }
