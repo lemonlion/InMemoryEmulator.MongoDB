@@ -151,7 +151,12 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
             }
             catch (MongoWriteException ex) when (!isOrdered)
             {
-                errors.Add(MongoErrors.CreateBulkWriteError(i, ServerErrorCategory.DuplicateKey, 11000, ex.Message));
+                // Ref: https://www.mongodb.com/docs/manual/reference/method/db.collection.insertMany/
+                //   "Unordered inserts collect all errors and report them together."
+                //   Preserve the actual error code and category from the original exception.
+                var errorCode = ex.WriteError?.Code ?? 11000;
+                var errorCategory = ex.WriteError?.Category ?? ServerErrorCategory.DuplicateKey;
+                errors.Add(MongoErrors.CreateBulkWriteError(i, errorCategory, errorCode, ex.Message));
             }
             catch (MongoWriteException ex) when (isOrdered)
             {

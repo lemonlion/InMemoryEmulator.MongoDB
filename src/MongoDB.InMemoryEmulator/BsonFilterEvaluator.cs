@@ -162,10 +162,13 @@ internal static class BsonFilterEvaluator
             // Ref: https://www.mongodb.com/docs/manual/tutorial/query-arrays/
             //   "When the field holds an array, comparison operators match the document
             //    if at least one array element meets the condition."
-            "$gt" => fieldExists && MatchesComparison(fieldValue, operand, (a, b) => a.CompareTo(b) > 0),
-            "$gte" => fieldExists && MatchesComparison(fieldValue, operand, (a, b) => a.CompareTo(b) >= 0),
-            "$lt" => fieldExists && MatchesComparison(fieldValue, operand, (a, b) => a.CompareTo(b) < 0),
-            "$lte" => fieldExists && MatchesComparison(fieldValue, operand, (a, b) => a.CompareTo(b) <= 0),
+            // Ref: https://www.mongodb.com/docs/manual/tutorial/query-for-null-fields/
+            //   When operand is null, missing fields are treated as null for comparison.
+            //   null >= null and null <= null are true, so $gte/$lte null match missing fields.
+            "$gt" => MatchesComparisonWithNull(fieldValue, fieldExists, operand, (a, b) => a.CompareTo(b) > 0),
+            "$gte" => MatchesComparisonWithNull(fieldValue, fieldExists, operand, (a, b) => a.CompareTo(b) >= 0),
+            "$lt" => MatchesComparisonWithNull(fieldValue, fieldExists, operand, (a, b) => a.CompareTo(b) < 0),
+            "$lte" => MatchesComparisonWithNull(fieldValue, fieldExists, operand, (a, b) => a.CompareTo(b) <= 0),
             "$in" => MatchesIn(fieldValue, fieldExists, operand.AsBsonArray),
             "$nin" => !MatchesIn(fieldValue, fieldExists, operand.AsBsonArray),
             // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/exists/
@@ -296,6 +299,28 @@ internal static class BsonFilterEvaluator
             return array.Any(el => compare(el, operand));
 
         return compare(fieldValue, operand);
+    }
+
+    /// <summary>
+    /// Comparison handler that correctly treats missing fields as null when operand is null.
+    /// </summary>
+    /// <remarks>
+    /// Ref: https://www.mongodb.com/docs/manual/tutorial/query-for-null-fields/
+    ///   Missing fields are treated as null for comparison purposes.
+    ///   This means { x: { $gte: null } } matches documents where x is missing
+    ///   (because null >= null is true), but { x: { $gt: null } } does not
+    ///   (because null > null is false).
+    /// </remarks>
+    private static bool MatchesComparisonWithNull(BsonValue fieldValue, bool fieldExists, BsonValue operand, Func<BsonValue, BsonValue, bool> compare)
+    {
+        // When operand is null, treat missing fields as null for the comparison
+        if ((operand == BsonNull.Value || operand.IsBsonNull) && !fieldExists)
+            return compare(BsonNull.Value, BsonNull.Value);
+
+        if (!fieldExists)
+            return false;
+
+        return MatchesComparison(fieldValue, operand, compare);
     }
 
     private static bool MatchesIn(BsonValue fieldValue, bool fieldExists, BsonArray values)

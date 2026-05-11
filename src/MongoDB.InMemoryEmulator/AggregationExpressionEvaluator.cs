@@ -940,7 +940,7 @@ internal static class AggregationExpressionEvaluator
         var array = arr[0].AsBsonArray;
         var idx = arr[1].ToInt32();
         if (idx < 0) idx += array.Count;
-        if (idx < 0 || idx >= array.Count) return BsonNull.Value;
+        if (idx < 0 || idx >= array.Count) return RemoveSentinel;
         return array[idx];
     }
 
