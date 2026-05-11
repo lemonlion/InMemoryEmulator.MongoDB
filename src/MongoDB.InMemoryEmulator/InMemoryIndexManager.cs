@@ -199,11 +199,15 @@ public class InMemoryIndexManager<TDocument> : IMongoIndexManager<TDocument>
     public void DropOne(string name, DropIndexOptions? options, CancellationToken cancellationToken = default)
     {
         if (name == "_id_")
-            throw new MongoCommandException(null!, "cannot drop _id index", new BsonDocument("ok", 0));
+            throw new MongoCommandException(MongoErrors.SyntheticConnectionId, "cannot drop _id index", new BsonDocument("ok", 0));
 
         lock (_lock)
         {
-            _indexes.RemoveAll(idx => idx["name"].AsString == name);
+            // Ref: https://www.mongodb.com/docs/manual/reference/method/db.collection.dropIndex/
+            //   "If you specify a name that does not correspond to an existing index, the method errors."
+            int removed = _indexes.RemoveAll(idx => idx["name"].AsString == name);
+            if (removed == 0)
+                throw new MongoCommandException(MongoErrors.SyntheticConnectionId, $"index not found with name [{name}]", new BsonDocument("ok", 0));
         }
     }
 

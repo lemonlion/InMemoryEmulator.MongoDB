@@ -168,7 +168,9 @@ internal static class BsonFilterEvaluator
             "$lte" => fieldExists && MatchesComparison(fieldValue, operand, (a, b) => a.CompareTo(b) <= 0),
             "$in" => MatchesIn(fieldValue, fieldExists, operand.AsBsonArray),
             "$nin" => !MatchesIn(fieldValue, fieldExists, operand.AsBsonArray),
-            "$exists" => operand.AsBoolean ? fieldExists : !fieldExists,
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/exists/
+            //   "$exists accepts truthy/falsy values (0/1, true/false, null)."
+            "$exists" => operand.ToBoolean() ? fieldExists : !fieldExists,
             "$type" => fieldExists && MatchesType(fieldValue, operand),
             // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/not/
             //   "$not performs a logical NOT operation on the specified <operator-expression>."
@@ -188,6 +190,10 @@ internal static class BsonFilterEvaluator
                       {
                           if (required is BsonDocument reqDoc && reqDoc.ElementCount == 1 && reqDoc.GetElement(0).Name == "$elemMatch")
                               return MatchesElemMatch(fieldValue, reqDoc["$elemMatch"].AsBsonDocument);
+                          // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/all/
+                          //   "{ tags: { $all: [/^ssl/] } }" — regex elements perform regex matching.
+                          if (required is BsonRegularExpression regex)
+                              return MatchesRegex(fieldValue, regex);
                           if (fieldValue is BsonArray allArr)
                               return allArr.Any(el => el.Equals(required));
                           return fieldValue.Equals(required);

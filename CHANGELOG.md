@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.44] - 2025-07-11
+
+### Fixed
+- `$all` operator now supports regex elements — previously regex patterns were compared with strict equality instead of regex matching
+- `Indexes.DropOne()` now throws `MongoCommandException` when the index name does not exist (was silently no-op)
+- `$group { $sum }` now returns `Decimal128` when any input is Decimal128 (was returning Double)
+- `$group { $sum: 1 }` literal count now returns `Int32` when result fits (was always returning Int64)
+- `$exists` operator now accepts truthy/falsy values (e.g. `1`, `0`) instead of requiring strict boolean
+
+### Added
+- 11 new integration tests covering all fixes
+
 ## [0.11.43] - 2025-07-11
 
 ### Fixed

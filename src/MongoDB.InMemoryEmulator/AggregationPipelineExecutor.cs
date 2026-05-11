@@ -387,33 +387,59 @@ internal static class AggregationPipelineExecutor
     private static BsonValue ComputeSum(List<BsonDocument> docs, BsonValue fieldExpr)
     {
         // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/sum/
-        //   "Returns an integer when all values are integers."
-        //   "Returns a long when any value is a long."
+        //   "Returns an integer when all values are integers and the sum does not exceed int range."
+        //   "Returns a long when any value is a long or sum overflows int."
         //   "Returns a double when any value is a double."
+        //   "Returns a decimal when any value is a decimal."
+        //   Type precedence: Decimal128 > Double > Int64 > Int32
         if (fieldExpr is BsonInt32 literal)
-            return new BsonInt64((long)literal.Value * docs.Count);
+        {
+            long result = (long)literal.Value * docs.Count;
+            if (result >= int.MinValue && result <= int.MaxValue)
+                return new BsonInt32((int)result);
+            return new BsonInt64(result);
+        }
 
+        bool hasDecimal = false;
         bool hasDouble = false;
         bool hasLong = false;
-        double sum = 0;
+        decimal decimalSum = 0;
+        double doubleSum = 0;
+        long longSum = 0;
         foreach (var doc in docs)
         {
             var val = AggregationExpressionEvaluator.Evaluate(doc, fieldExpr);
             if (val.IsNumeric)
             {
-                sum += val.ToDouble();
-                if (val.BsonType == BsonType.Double || val.BsonType == BsonType.Decimal128)
+                if (val.BsonType == BsonType.Decimal128)
+                {
+                    hasDecimal = true;
+                    decimalSum += val.AsDecimal;
+                    doubleSum += val.ToDouble();
+                }
+                else if (val.BsonType == BsonType.Double)
+                {
                     hasDouble = true;
-                else if (val.BsonType == BsonType.Int64)
-                    hasLong = true;
+                    doubleSum += val.AsDouble;
+                    decimalSum += (decimal)val.AsDouble;
+                }
+                else
+                {
+                    var longVal = val.ToInt64();
+                    if (val.BsonType == BsonType.Int64)
+                        hasLong = true;
+                    longSum += longVal;
+                    doubleSum += longVal;
+                    decimalSum += longVal;
+                }
             }
         }
 
-        if (hasDouble) return new BsonDouble(sum);
-        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/sum/
-        //   "Returns a long when the result would overflow the int range."
-        if (hasLong || sum > int.MaxValue || sum < int.MinValue) return new BsonInt64((long)sum);
-        return new BsonInt32((int)sum);
+        if (hasDecimal) return new BsonDecimal128((Decimal128)decimalSum);
+        if (hasDouble) return new BsonDouble(doubleSum);
+        long totalLong = longSum;
+        if (hasLong || totalLong > int.MaxValue || totalLong < int.MinValue) return new BsonInt64(totalLong);
+        return new BsonInt32((int)totalLong);
     }
 
     private static BsonValue ComputeAvg(List<BsonDocument> docs, BsonValue fieldExpr)
