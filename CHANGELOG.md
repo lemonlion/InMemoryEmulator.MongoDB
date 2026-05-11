@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.41] - 2025-07-11
+
+### Fixed
+- `RenameCollection` now respects `DropTarget` option — previously always threw when target collection existed regardless of the option
+- `ReplaceOne` and `FindOneAndReplace` with upsert now correctly extract `_id` from filter equality conditions — previously generated a new ObjectId even when filter specified `{_id: "value"}`
+- `$mod` filter now truncates floating-point divisor and remainder towards zero per MongoDB spec — previously used floating-point modulo directly, causing `$mod: [4.5, 0]` to behave incorrectly
+
+### Added
+- 10 new integration tests covering all fixes
+
 ## [0.11.40] - 2026-05-10
 
 ### Fixed

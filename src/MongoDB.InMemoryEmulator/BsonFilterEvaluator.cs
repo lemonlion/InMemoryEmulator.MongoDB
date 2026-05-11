@@ -538,12 +538,16 @@ internal static class BsonFilterEvaluator
     private static bool MatchesModSingle(BsonValue fieldValue, BsonArray operand)
     {
         if (!fieldValue.IsNumeric) return false;
-        var divisor = operand[0].ToDouble();
-        var remainder = operand[1].ToDouble();
         // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/mod/
-        //   "Select documents where the value of a field divided by a divisor has the specified remainder."
-        //   MongoDB uses exact comparison, not fuzzy tolerance.
-        return fieldValue.ToDouble() % divisor == remainder;
+        //   "Floating Point Arguments: The $mod expression rounds decimal input towards zero."
+        //   Only the divisor and remainder arguments are truncated to integers.
+        //   The field value is used as-is (double precision).
+        var divisor = (long)operand[0].ToDouble();
+        var remainder = (long)operand[1].ToDouble();
+        if (divisor == 0) return false;
+        var val = fieldValue.ToDouble();
+        if (double.IsNaN(val) || double.IsInfinity(val)) return false;
+        return val % divisor == remainder;
     }
 
     private static bool MatchesBits(BsonValue fieldValue, BsonValue bitmask, string mode)

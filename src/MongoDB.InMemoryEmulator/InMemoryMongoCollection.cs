@@ -481,6 +481,18 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         {
             if (options?.IsUpsert == true)
             {
+                // Ref: https://www.mongodb.com/docs/manual/reference/method/db.collection.replaceOne/
+                //   "If upsert: true and no documents match the filter, the new document
+                //    uses the _id from the replacement or the equality _id from the filter."
+                if (!replacementBson.Contains("_id") || replacementBson["_id"] == BsonNull.Value)
+                {
+                    var filterDoc = CreateUpsertDocumentFromFilter(filter);
+                    if (filterDoc.Contains("_id") && filterDoc["_id"] != BsonNull.Value)
+                    {
+                        replacementBson.Remove("_id");
+                        replacementBson.InsertAt(0, new BsonElement("_id", filterDoc["_id"]));
+                    }
+                }
                 DocumentStore.EnsureId(replacementBson);
                 _indexManager.ValidateDocument(replacementBson);
                 ValidateSchemaOnWrite(replacementBson);
@@ -791,6 +803,18 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         {
             if (options?.IsUpsert == true)
             {
+                // Ref: https://www.mongodb.com/docs/manual/reference/method/db.collection.findOneAndReplace/
+                //   "If upsert: true and no documents match, uses the _id from the replacement
+                //    or the equality _id from the filter."
+                if (!replacementBson.Contains("_id") || replacementBson["_id"] == BsonNull.Value)
+                {
+                    var filterDoc = CreateUpsertDocumentFromFilter(filter);
+                    if (filterDoc.Contains("_id") && filterDoc["_id"] != BsonNull.Value)
+                    {
+                        replacementBson.Remove("_id");
+                        replacementBson.InsertAt(0, new BsonElement("_id", filterDoc["_id"]));
+                    }
+                }
                 DocumentStore.EnsureId(replacementBson);
                 _indexManager.ValidateDocument(replacementBson);
                 ValidateSchemaOnWrite(replacementBson);

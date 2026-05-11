@@ -282,10 +282,23 @@ public class InMemoryMongoDatabase : IMongoDatabase
         cancellationToken.ThrowIfCancellationRequested();
 
         // Ref: https://www.mongodb.com/docs/manual/reference/command/renameCollection/
-        //   "Returns an error if target namespace already exists."
-        // Check target first to avoid removing the source and then failing to add.
+        //   "dropTarget: If true, mongod will drop the target of renameCollection prior to
+        //    renaming the collection."
         if (_stores.ContainsKey(newName))
-            throw MongoErrors.NamespaceExists($"{DatabaseNamespace.DatabaseName}.{newName}");
+        {
+            if (options?.DropTarget == true)
+            {
+                _stores.TryRemove(newName, out _);
+                _explicitlyCreated.TryRemove(newName, out _);
+                _validators.TryRemove(newName, out _);
+                _views.TryRemove(newName, out _);
+                _timeSeriesOptions.TryRemove(newName, out _);
+            }
+            else
+            {
+                throw MongoErrors.NamespaceExists($"{DatabaseNamespace.DatabaseName}.{newName}");
+            }
+        }
 
         if (_stores.TryRemove(oldName, out var store))
         {
