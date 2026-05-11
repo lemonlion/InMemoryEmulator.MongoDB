@@ -62,14 +62,14 @@ public class Round18BugFixTests : IAsyncLifetime
 
     #endregion
 
-    #region $toUpper on non-string throws error
+    #region $toUpper on non-string returns empty string
 
     [Fact]
     [Trait(TestTraits.Target, TestTraits.All)]
-    public async Task ToUpper_OnInteger_ThrowsError()
+    public async Task ToUpper_OnInteger_ReturnsEmptyString()
     {
         // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/toUpper/
-        //   "$toUpper only supports string types, not int"
+        //   Real MongoDB does not throw for non-string types; it returns "" (same as null).
         var col = _fixture.GetCollection<BsonDocument>("r18_toupper_nonstr");
         await col.InsertOneAsync(new BsonDocument { { "_id", 1 }, { "val", 123 } });
 
@@ -79,8 +79,9 @@ public class Round18BugFixTests : IAsyncLifetime
                 new BsonDocument("$toUpper", "$val")))
         };
 
-        await Assert.ThrowsAsync<MongoCommandException>(
-            () => col.Aggregate<BsonDocument>(pipeline).ToListAsync());
+        var results = await col.Aggregate<BsonDocument>(pipeline).ToListAsync();
+        Assert.Single(results);
+        Assert.Equal("", results[0]["result"].AsString);
     }
 
     #endregion
