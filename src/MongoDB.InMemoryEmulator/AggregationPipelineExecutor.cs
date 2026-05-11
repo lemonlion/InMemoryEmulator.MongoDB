@@ -527,22 +527,47 @@ internal static class AggregationPipelineExecutor
 
     private static BsonValue ComputeStdDevPop(List<BsonDocument> docs, BsonValue fieldExpr)
     {
-        var values = docs.Select(d => AggregationExpressionEvaluator.Evaluate(d, fieldExpr))
-            .Where(v => v.IsNumeric).Select(v => v.ToDouble()).ToList();
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/stdDevPop/
+        //   "Result Type: $stdDevPop returns the population standard deviation of the input values as a decimal."
+        //   When any input is Decimal128, return Decimal128; otherwise return Double (consistent with $avg).
+        bool hasDecimal = false;
+        var values = new List<double>();
+        foreach (var doc in docs)
+        {
+            var val = AggregationExpressionEvaluator.Evaluate(doc, fieldExpr);
+            if (val.IsNumeric)
+            {
+                if (val.BsonType == BsonType.Decimal128) hasDecimal = true;
+                values.Add(val.ToDouble());
+            }
+        }
         if (values.Count == 0) return BsonNull.Value;
         double avg = values.Average();
         double variance = values.Sum(v => (v - avg) * (v - avg)) / values.Count;
-        return new BsonDouble(Math.Sqrt(variance));
+        double result = Math.Sqrt(variance);
+        return hasDecimal ? new BsonDecimal128((Decimal128)(decimal)result) : new BsonDouble(result);
     }
 
     private static BsonValue ComputeStdDevSamp(List<BsonDocument> docs, BsonValue fieldExpr)
     {
-        var values = docs.Select(d => AggregationExpressionEvaluator.Evaluate(d, fieldExpr))
-            .Where(v => v.IsNumeric).Select(v => v.ToDouble()).ToList();
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/stdDevSamp/
+        //   Same return type behavior as $stdDevPop.
+        bool hasDecimal = false;
+        var values = new List<double>();
+        foreach (var doc in docs)
+        {
+            var val = AggregationExpressionEvaluator.Evaluate(doc, fieldExpr);
+            if (val.IsNumeric)
+            {
+                if (val.BsonType == BsonType.Decimal128) hasDecimal = true;
+                values.Add(val.ToDouble());
+            }
+        }
         if (values.Count < 2) return BsonNull.Value;
         double avg = values.Average();
         double variance = values.Sum(v => (v - avg) * (v - avg)) / (values.Count - 1);
-        return new BsonDouble(Math.Sqrt(variance));
+        double result = Math.Sqrt(variance);
+        return hasDecimal ? new BsonDecimal128((Decimal128)(decimal)result) : new BsonDouble(result);
     }
 
     private static BsonValue ComputeTop(List<BsonDocument> docs, BsonDocument accSpec)

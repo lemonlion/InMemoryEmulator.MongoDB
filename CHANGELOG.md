@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.50] - 2025-07-11
+
+### Fixed
+- `$stdDevPop` and `$stdDevSamp` accumulators now return `Decimal128` when any input value is `Decimal128` (was always returning `Double`)
+
+### Added
+- 5 new integration tests covering all fixes
+
 ## [0.11.49] - 2025-07-11
 
 ### Fixed
