@@ -444,14 +444,36 @@ internal static class AggregationPipelineExecutor
 
     private static BsonValue ComputeAvg(List<BsonDocument> docs, BsonValue fieldExpr)
     {
-        double sum = 0;
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/avg/
+        //   "The default return type is a double. If at least one operand is a decimal,
+        //    then the return type is a decimal."
+        double doubleSum = 0;
+        decimal decimalSum = 0;
+        bool hasDecimal = false;
         int count = 0;
         foreach (var doc in docs)
         {
             var val = AggregationExpressionEvaluator.Evaluate(doc, fieldExpr);
-            if (val.IsNumeric) { sum += val.ToDouble(); count++; }
+            if (val.IsNumeric)
+            {
+                if (val.BsonType == BsonType.Decimal128)
+                {
+                    hasDecimal = true;
+                    decimalSum += val.AsDecimal;
+                    doubleSum += val.ToDouble();
+                }
+                else
+                {
+                    var d = val.ToDouble();
+                    doubleSum += d;
+                    decimalSum += (decimal)d;
+                }
+                count++;
+            }
         }
-        return count == 0 ? BsonNull.Value : new BsonDouble(sum / count);
+        if (count == 0) return BsonNull.Value;
+        if (hasDecimal) return new BsonDecimal128((Decimal128)(decimalSum / count));
+        return new BsonDouble(doubleSum / count);
     }
 
     private static BsonValue ComputeMin(List<BsonDocument> docs, BsonValue fieldExpr)

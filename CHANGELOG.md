@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.49] - 2025-07-11
+
+### Fixed
+- `$avg` accumulator now returns `Decimal128` when any input value is `Decimal128` (was always returning `Double`)
+- `$indexOfBytes` and `$indexOfCP` now throw an error when `start` or `end` is a negative integer (was returning -1)
+
+### Added
+- 9 new integration tests covering all fixes
+
 ## [0.11.48] - 2025-07-11
 
 ### Fixed

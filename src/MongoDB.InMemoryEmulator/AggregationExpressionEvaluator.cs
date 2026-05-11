@@ -696,8 +696,12 @@ internal static class AggregationExpressionEvaluator
         int start = arr.Count > 2 ? arr[2].ToInt32() : 0;
         int end = arr.Count > 3 ? arr[3].ToInt32() : str.Length;
         // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/indexOfBytes/
-        //   Returns -1 when start > string length (e.g. { $indexOfBytes: ["vanilla", "ll", 12] } → -1)
-        if (start < 0 || start >= str.Length) return new BsonInt32(-1);
+        //   "If the <start> or <end> is a negative number, $indexOfBytes returns an error."
+        if (start < 0)
+            throw MongoErrors.BadValue("$indexOfBytes/$indexOfCP: starting index must be non-negative");
+        if (end < 0)
+            throw MongoErrors.BadValue("$indexOfBytes/$indexOfCP: ending index must be non-negative");
+        if (start >= str.Length) return new BsonInt32(-1);
         end = Math.Min(end, str.Length);
         if (end <= start) return new BsonInt32(-1);
         var idx = str.IndexOf(sub, start, end - start, StringComparison.Ordinal);
