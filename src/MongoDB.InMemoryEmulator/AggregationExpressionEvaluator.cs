@@ -32,6 +32,26 @@ internal static class AggregationExpressionEvaluator
     internal static bool IsRemove(BsonValue value) => ReferenceEquals(value, RemoveSentinel);
 
     /// <summary>
+    /// Evaluate an expression, but return RemoveSentinel when a simple field path
+    /// refers to a missing field (as opposed to an explicitly null field).
+    /// Used by $push/$addToSet accumulators which skip missing fields.
+    /// </summary>
+    /// <remarks>
+    /// Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/push/
+    ///   Real MongoDB $push does not include a value for documents where the field is missing.
+    /// </remarks>
+    internal static BsonValue EvaluateSkipMissing(BsonDocument doc, BsonValue expr, BsonDocument? variables = null)
+    {
+        if (expr is BsonString s && s.Value.StartsWith("$") && !s.Value.StartsWith("$$"))
+        {
+            var fieldPath = s.Value[1..];
+            if (!BsonFilterEvaluator.FieldExists(doc, fieldPath))
+                return RemoveSentinel;
+        }
+        return Evaluate(doc, expr, variables);
+    }
+
+    /// <summary>
     /// Evaluate an expression against a document, returning the resulting BsonValue.
     /// </summary>
     internal static BsonValue Evaluate(BsonDocument doc, BsonValue expr, BsonDocument? variables = null)
@@ -616,9 +636,13 @@ internal static class AggregationExpressionEvaluator
         // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/toUpper/
         //   "If the argument resolves to null, $toUpper returns an empty string ''." (same for $toLower)
         if (val == BsonNull.Value) return new BsonString("");
-        // Real MongoDB returns "" for non-string types rather than throwing.
-        if (!val.IsString) return new BsonString("");
-        return new BsonString(fn(val.AsString));
+        if (val.IsString) return new BsonString(fn(val.AsString));
+        // Ref: Observed real MongoDB 7.0 behavior:
+        //   Numeric types (int32, int64, double, decimal128) are converted to their string representation.
+        //   Non-numeric, non-string types (bool, array, etc.) throw an error.
+        if (val.IsNumeric || val.BsonType == BsonType.Decimal128)
+            return new BsonString(fn(val.ToString()!));
+        throw MongoErrors.BadValue($"can't convert from BSON type {val.BsonType} to String");
     }
 
     private static BsonValue EvalTrim(BsonDocument doc, BsonValue args, BsonDocument? variables,
@@ -663,9 +687,10 @@ internal static class AggregationExpressionEvaluator
         var str = arr[0].AsString;
         var start = arr[1].ToInt32();
         var length = arr[2].ToInt32();
-        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/substr/
-        //   "If <start> is a negative number, $substr returns an empty string."
-        if (start < 0) return new BsonString("");
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/substrBytes/
+        //   Real MongoDB 7.0 throws: "$substrBytes: starting index must be non-negative"
+        if (start < 0)
+            throw MongoErrors.BadValue("$substrBytes:  starting index must be non-negative (got: " + start + ")");
         if (start >= str.Length) return new BsonString("");
         return new BsonString(str.Substring(start, Math.Min(length, str.Length - start)));
     }
@@ -2002,12 +2027,12 @@ internal static class AggregationExpressionEvaluator
             return BsonFilterEvaluator.ResolveFieldPath(doc, args.AsString);
         var spec = args.AsBsonDocument;
         var field = Evaluate(doc, spec["field"], variables).AsString;
-        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/getField/
-        //   "If the input argument resolves to null, $getField returns null."
+        // Ref: Observed real MongoDB 7.0:
+        //   When input resolves to null/missing, $getField omits the field from output entirely.
         var inputVal = spec.Contains("input") ? Evaluate(doc, spec["input"], variables) : (BsonValue)doc;
-        if (inputVal == BsonNull.Value) return BsonNull.Value;
+        if (inputVal == BsonNull.Value || inputVal.IsBsonNull) return RemoveSentinel;
         var input = inputVal.AsBsonDocument;
-        return input.Contains(field) ? input[field] : BsonNull.Value;
+        return input.Contains(field) ? input[field] : RemoveSentinel;
     }
 
     private static BsonValue EvalSetField(BsonDocument doc, BsonValue args, BsonDocument? variables)

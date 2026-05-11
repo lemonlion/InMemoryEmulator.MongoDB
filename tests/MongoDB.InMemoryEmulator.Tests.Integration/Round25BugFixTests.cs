@@ -31,7 +31,7 @@ public class Round25BugFixTests : IAsyncLifetime
         var col = _fixture.GetCollection<BsonDocument>("r25_inc_null");
         await col.InsertOneAsync(new BsonDocument { { "_id", 1 }, { "x", BsonNull.Value } });
 
-        var ex = await Assert.ThrowsAsync<MongoCommandException>(() =>
+        var ex = await Assert.ThrowsAsync<MongoWriteException>(() =>
             col.UpdateOneAsync(
                 Builders<BsonDocument>.Filter.Eq("_id", 1),
                 Builders<BsonDocument>.Update.Inc("x", 5)));
@@ -52,7 +52,7 @@ public class Round25BugFixTests : IAsyncLifetime
         var col = _fixture.GetCollection<BsonDocument>("r25_mul_null");
         await col.InsertOneAsync(new BsonDocument { { "_id", 1 }, { "x", BsonNull.Value } });
 
-        var ex = await Assert.ThrowsAsync<MongoCommandException>(() =>
+        var ex = await Assert.ThrowsAsync<MongoWriteException>(() =>
             col.UpdateOneAsync(
                 Builders<BsonDocument>.Filter.Eq("_id", 1),
                 Builders<BsonDocument>.Update.Mul("x", 3)));

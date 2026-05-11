@@ -38,7 +38,7 @@ public class Round21BugFixTests : IAsyncLifetime
         });
 
         // Attempting to $set "a.b.c" when a.b is 5 (scalar)
-        await Assert.ThrowsAsync<MongoCommandException>(() =>
+        await Assert.ThrowsAsync<MongoWriteException>(() =>
             col.UpdateOneAsync(
                 Builders<BsonDocument>.Filter.Eq("_id", 1),
                 Builders<BsonDocument>.Update.Set("a.b.c", 10)));

@@ -111,19 +111,20 @@ public class Round20BugFixTests : IAsyncLifetime
     public async Task Mod_UsesExactComparison_NotFuzzy()
     {
         // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/mod/
-        //   "Select documents where the value of a field divided by a divisor has the specified remainder."
-        //   The comparison should be exact, not fuzzy.
+        //   "Changed in version 7.2: If the value of a field is not an integer,
+        //    the $mod expression rounds the value towards zero to the nearest integer
+        //    before performing the operation."
         var col = _fixture.GetCollection<BsonDocument>("r20_mod_exact");
         await col.InsertManyAsync(new[]
         {
-            new BsonDocument { { "_id", 1 }, { "x", 10 } },       // 10 % 3 = 1 → match
-            new BsonDocument { { "_id", 2 }, { "x", 10.00005 } },  // 10.00005 % 3 ≈ 1.00005 → should NOT match
+            new BsonDocument { { "_id", 1 }, { "x", 10 } },       // truncate(10)=10, 10 % 3 = 1 → match
+            new BsonDocument { { "_id", 2 }, { "x", 11.9 } },     // truncate(11.9)=11, 11 % 3 = 2 → no match
         });
 
         var filter = Builders<BsonDocument>.Filter.Mod("x", 3, 1);
         var results = await col.Find(filter).ToListAsync();
 
-        // Only doc with _id=1 should match (exact remainder of 1)
+        // Only doc with _id=1 should match (truncate(11.9)=11, 11%3=2 ≠ 1)
         Assert.Single(results);
         Assert.Equal(1, results[0]["_id"].AsInt32);
     }

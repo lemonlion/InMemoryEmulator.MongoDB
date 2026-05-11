@@ -567,6 +567,20 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
 
     public UpdateResult UpdateOne(FilterDefinition<TDocument> filter, UpdateDefinition<TDocument> update, UpdateOptions? options = null, CancellationToken cancellationToken = default)
     {
+        // Ref: https://www.mongodb.com/docs/drivers/csharp/current/fundamentals/crud/write-operations/
+        //   "If the write operation fails, the driver throws a MongoWriteException."
+        try
+        {
+            return UpdateOneCore(filter, update, options, cancellationToken);
+        }
+        catch (MongoCommandException ex)
+        {
+            throw MongoErrors.WrapAsWriteError(ex);
+        }
+    }
+
+    private UpdateResult UpdateOneCore(FilterDefinition<TDocument> filter, UpdateDefinition<TDocument> update, UpdateOptions? options, CancellationToken cancellationToken)
+    {
         cancellationToken.ThrowIfCancellationRequested();
         var updateBson = RenderUpdate(update);
         var renderedFilter = RenderFilter(filter);
@@ -647,6 +661,20 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         => Task.FromResult(UpdateOne(filter, update, options, cancellationToken));
 
     public UpdateResult UpdateMany(FilterDefinition<TDocument> filter, UpdateDefinition<TDocument> update, UpdateOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        // Ref: https://www.mongodb.com/docs/drivers/csharp/current/fundamentals/crud/write-operations/
+        //   "If the write operation fails, the driver throws a MongoWriteException."
+        try
+        {
+            return UpdateManyCore(filter, update, options, cancellationToken);
+        }
+        catch (MongoCommandException ex)
+        {
+            throw MongoErrors.WrapAsWriteError(ex);
+        }
+    }
+
+    private UpdateResult UpdateManyCore(FilterDefinition<TDocument> filter, UpdateDefinition<TDocument> update, UpdateOptions? options, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var updateBson = RenderUpdate(update);
@@ -1090,9 +1118,13 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
             // Ref: https://www.mongodb.com/docs/manual/reference/command/distinct/
             //   "If the value of the specified field is an array, distinct considers each element
             //    of the array as a separate value."
-            //   Null values (explicit null or missing field) are included once.
+            //   Real MongoDB does NOT include null for documents where the field is missing.
+            //   Only explicitly null-valued fields contribute a null value.
             // Ref: https://www.mongodb.com/docs/manual/core/document/#dot-notation
             //   Dot-notation traverses arrays of subdocuments.
+            if (!fieldName.Contains('.') && !BsonFilterEvaluator.FieldExists(doc, fieldName))
+                continue;
+
             var allValues = fieldName.Contains('.')
                 ? BsonFilterEvaluator.ResolveFieldPathThroughArrays(doc, fieldName)
                 : new List<BsonValue> { BsonFilterEvaluator.ResolveFieldPath(doc, fieldName) };

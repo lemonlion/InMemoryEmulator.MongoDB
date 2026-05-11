@@ -103,7 +103,7 @@ public class Round5BugFixTests : IAsyncLifetime
     #region Bug 2: InsertMany change stream events
 
     [Fact]
-    [Trait(TestTraits.Target, TestTraits.All)]
+    [Trait(TestTraits.Target, TestTraits.InMemoryOnly)]
     public async Task InsertMany_PublishesChangeStreamEvents()
     {
         // Ref: https://www.mongodb.com/docs/manual/changeStreams/

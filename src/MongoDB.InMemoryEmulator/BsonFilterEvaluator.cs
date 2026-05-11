@@ -309,15 +309,21 @@ internal static class BsonFilterEvaluator
     /// <remarks>
     /// Ref: https://www.mongodb.com/docs/manual/tutorial/query-for-null-fields/
     ///   Missing fields are treated as null for comparison purposes.
-    ///   This means { x: { $gte: null } } matches documents where x is missing
-    ///   (because null >= null is true), but { x: { $gt: null } } does not
-    ///   (because null > null is false).
+    ///   Real MongoDB 7.0: {$gt: null} and {$lt: null} match NOTHING.
+    ///   {$gte: null} and {$lte: null} match only documents where the field is null or missing.
     /// </remarks>
     private static bool MatchesComparisonWithNull(BsonValue fieldValue, bool fieldExists, BsonValue operand, Func<BsonValue, BsonValue, bool> compare)
     {
         // When operand is null, treat missing fields as null for the comparison
         if ((operand == BsonNull.Value || operand.IsBsonNull) && !fieldExists)
             return compare(BsonNull.Value, BsonNull.Value);
+
+        // Ref: Observed real MongoDB 7.0:
+        //   When operand is null and field exists with a non-null value,
+        //   strict comparisons ($gt/$lt) never match. Only $gte/$lte null match null/missing.
+        if ((operand == BsonNull.Value || operand.IsBsonNull) && fieldExists
+            && fieldValue != BsonNull.Value && !fieldValue.IsBsonNull)
+            return false;
 
         if (!fieldExists)
             return false;
@@ -550,11 +556,34 @@ internal static class BsonFilterEvaluator
         {
             if (element is BsonDocument elementDoc)
                 return Matches(elementDoc, criteria);
-            // For scalar elements, wrap in a doc and match against operator conditions
-            var wrapped = new BsonDocument("_val", element);
-            var wrappedCriteria = new BsonDocument("_val", criteria);
-            return Matches(wrapped, wrappedCriteria);
+            // For scalar elements, handle logical operators at top level specially
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/elemMatch/
+            //   Logical operators ($or, $and, $nor) apply to the element context.
+            return MatchesScalarElemMatch(element, criteria);
         });
+    }
+
+    private static bool MatchesScalarElemMatch(BsonValue element, BsonDocument criteria)
+    {
+        foreach (var crit in criteria)
+        {
+            bool result = crit.Name switch
+            {
+                "$or" => crit.Value.AsBsonArray.Any(sub => MatchesScalarElemMatch(element, sub.AsBsonDocument)),
+                "$and" => crit.Value.AsBsonArray.All(sub => MatchesScalarElemMatch(element, sub.AsBsonDocument)),
+                "$nor" => !crit.Value.AsBsonArray.Any(sub => MatchesScalarElemMatch(element, sub.AsBsonDocument)),
+                "$not" => !MatchesScalarElemMatch(element, crit.Value.AsBsonDocument),
+                _ => MatchesScalarCondition(element, crit.Name, crit.Value)
+            };
+            if (!result) return false;
+        }
+        return true;
+    }
+
+    private static bool MatchesScalarCondition(BsonValue element, string op, BsonValue operand)
+    {
+        // Wrap scalar in a document and use MatchesOperator
+        return MatchesOperator(element, true, op, operand);
     }
 
     private static bool MatchesMod(BsonValue fieldValue, BsonArray operand)
@@ -572,14 +601,12 @@ internal static class BsonFilterEvaluator
     {
         if (!fieldValue.IsNumeric) return false;
         // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/mod/
-        //   "Floating Point Arguments: The $mod expression rounds decimal input towards zero."
-        //   Only the divisor and remainder arguments are truncated to integers.
-        //   The field value is used as-is (double precision).
-        var divisor = (long)operand[0].ToDouble();
-        var remainder = (long)operand[1].ToDouble();
+        //   "If a value is not an integer, the $mod rounds towards zero to the
+        //    nearest integer before performing the operation."
+        var divisor = (long)Math.Truncate(operand[0].ToDouble());
+        var remainder = (long)Math.Truncate(operand[1].ToDouble());
         if (divisor == 0) return false;
-        var val = fieldValue.ToDouble();
-        if (double.IsNaN(val) || double.IsInfinity(val)) return false;
+        var val = (long)Math.Truncate(fieldValue.ToDouble());
         return val % divisor == remainder;
     }
 

@@ -299,6 +299,12 @@ internal static class BsonUpdateEvaluator
             var newName = element.Value.AsString;
 
             // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/rename/
+            //   "The source and target field for $rename must differ."
+            if (oldName == newName)
+                throw MongoErrors.BadValue(
+                    $"The source and target field for $rename must differ: {oldName}: \"{newName}\"");
+
+            // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/rename/
             //   "$rename does not work if these fields are in array elements."
             //   MongoDB errors with "The source field for $rename may not be dynamic"
             if (PathTraversesArray(doc, oldName) || PathTraversesArray(doc, newName))
@@ -382,17 +388,12 @@ internal static class BsonUpdateEvaluator
             var fieldPath = element.Name;
 
             // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/sort/
-            //   "You must use the $sort modifier with the $each modifier."
-            // Same requirement applies to $slice and $position.
+            //   Real MongoDB 7.0: If $sort/$slice/$position are used without $each,
+            //   the modifier document is pushed as a literal value (no error thrown).
             if (element.Value.IsBsonDocument)
             {
                 var pushDoc = element.Value.AsBsonDocument;
-                if (!pushDoc.Contains("$each") &&
-                    (pushDoc.Contains("$sort") || pushDoc.Contains("$slice") || pushDoc.Contains("$position")))
-                {
-                    var modifier = pushDoc.Contains("$sort") ? "$sort" : pushDoc.Contains("$slice") ? "$slice" : "$position";
-                    throw MongoErrors.BadValue($"The {modifier} modifier can only be used with the $each modifier");
-                }
+                // Only treat as modifiers if $each is present
             }
 
             if (HasPositionalOperator(fieldPath))

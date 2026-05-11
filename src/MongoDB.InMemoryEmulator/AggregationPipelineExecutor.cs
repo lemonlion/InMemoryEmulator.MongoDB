@@ -361,8 +361,8 @@ internal static class AggregationPipelineExecutor
                     "$max" => ComputeMax(groupDocs, fieldExpr),
                     "$first" => ComputeFirst(groupDocs, fieldExpr),
                     "$last" => ComputeLast(groupDocs, fieldExpr),
-                    "$push" => new BsonArray(groupDocs.Select(d => AggregationExpressionEvaluator.Evaluate(d, fieldExpr)).Where(v => v != AggregationExpressionEvaluator.RemoveSentinel)),
-                    "$addToSet" => new BsonArray(groupDocs.Select(d => AggregationExpressionEvaluator.Evaluate(d, fieldExpr)).Where(v => v != AggregationExpressionEvaluator.RemoveSentinel).Distinct(BsonValueComparer.Instance)),
+                    "$push" => new BsonArray(groupDocs.Select(d => AggregationExpressionEvaluator.EvaluateSkipMissing(d, fieldExpr)).Where(v => v != AggregationExpressionEvaluator.RemoveSentinel)),
+                    "$addToSet" => new BsonArray(groupDocs.Select(d => AggregationExpressionEvaluator.EvaluateSkipMissing(d, fieldExpr)).Where(v => v != AggregationExpressionEvaluator.RemoveSentinel).Distinct(BsonValueComparer.Instance)),
                     "$count" => new BsonInt32(groupDocs.Count),
                     "$mergeObjects" => ComputeMergeObjects(groupDocs, fieldExpr),
                     "$stdDevPop" => ComputeStdDevPop(groupDocs, fieldExpr),
@@ -1118,8 +1118,8 @@ internal static class AggregationPipelineExecutor
                 "$max" => ComputeMax(docs, fieldExpr),
                 "$first" => ComputeFirst(docs, fieldExpr),
                 "$last" => ComputeLast(docs, fieldExpr),
-                "$push" => new BsonArray(docs.Select(d => AggregationExpressionEvaluator.Evaluate(d, fieldExpr)).Where(v => v != AggregationExpressionEvaluator.RemoveSentinel)),
-                "$addToSet" => new BsonArray(docs.Select(d => AggregationExpressionEvaluator.Evaluate(d, fieldExpr)).Where(v => v != AggregationExpressionEvaluator.RemoveSentinel).Distinct(BsonValueComparer.Instance)),
+                "$push" => new BsonArray(docs.Select(d => AggregationExpressionEvaluator.EvaluateSkipMissing(d, fieldExpr)).Where(v => v != AggregationExpressionEvaluator.RemoveSentinel)),
+                "$addToSet" => new BsonArray(docs.Select(d => AggregationExpressionEvaluator.EvaluateSkipMissing(d, fieldExpr)).Where(v => v != AggregationExpressionEvaluator.RemoveSentinel).Distinct(BsonValueComparer.Instance)),
                 _ => throw new NotSupportedException($"Bucket accumulator '{op}' not supported")
             };
         }

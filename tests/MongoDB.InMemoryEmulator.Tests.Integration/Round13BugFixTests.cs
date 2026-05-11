@@ -176,10 +176,11 @@ public class Round13BugFixTests : IAsyncLifetime
 
     [Fact]
     [Trait(TestTraits.Target, TestTraits.All)]
-    public async Task Push_SortWithoutEach_ThrowsError()
+    public async Task Push_SortWithoutEach_PushesLiteralDocument()
     {
         // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/sort/
-        //   "You must use the $sort modifier with the $each modifier."
+        //   Real MongoDB 7.0: $push with $sort but without $each pushes the modifier
+        //   document as a literal value (e.g., {"$sort": 1}) — no error thrown.
         var col = _fixture.GetCollection<BsonDocument>("push_sort_no_each");
         await col.InsertOneAsync(new BsonDocument
         {
@@ -190,11 +191,15 @@ public class Round13BugFixTests : IAsyncLifetime
         var update = new BsonDocument("$push", new BsonDocument("arr",
             new BsonDocument("$sort", 1)));
 
-        // Should throw an error because $sort requires $each
-        await Assert.ThrowsAnyAsync<MongoCommandException>(async () =>
-            await col.UpdateOneAsync(
-                Builders<BsonDocument>.Filter.Eq("_id", 1),
-                new BsonDocumentUpdateDefinition<BsonDocument>(update)));
+        // Real MongoDB pushes {"$sort": 1} as a literal document value
+        await col.UpdateOneAsync(
+            Builders<BsonDocument>.Filter.Eq("_id", 1),
+            new BsonDocumentUpdateDefinition<BsonDocument>(update));
+
+        var result = await col.Find(Builders<BsonDocument>.Filter.Eq("_id", 1)).FirstAsync();
+        var arr = result["arr"].AsBsonArray;
+        Assert.Equal(4, arr.Count);
+        Assert.Equal(new BsonDocument("$sort", 1), arr[3].AsBsonDocument);
     }
 
     #endregion

@@ -99,8 +99,10 @@ public class Round32BugFixTests
         Assert.Single(result);
         var tags = result[0]["tags"].AsBsonArray;
 
-        // Should have 3 entries: "x", null (missing), null (explicit null)
-        Assert.Equal(3, tags.Count);
+        // Ref: Observed real MongoDB 7.0:
+        //   Missing fields are skipped by $push. Only explicit null is included.
+        //   Result: ["x", null] (2 entries)
+        Assert.Equal(2, tags.Count);
     }
 
     [Fact]
@@ -131,8 +133,10 @@ public class Round32BugFixTests
         var result = col.Aggregate(PipelineDefinition<BsonDocument, BsonDocument>.Create(pipeline)).ToList();
         Assert.Single(result);
         var tags = result[0]["tags"].AsBsonArray;
-        // Should have "x" and null (missing → null, deduped)
-        Assert.Equal(2, tags.Count);
+        // Ref: Observed real MongoDB 7.0:
+        //   Missing fields are skipped by $addToSet. No null added.
+        //   Result: ["x"] (1 entry — only the non-missing value)
+        Assert.Single(tags);
     }
 
     #endregion

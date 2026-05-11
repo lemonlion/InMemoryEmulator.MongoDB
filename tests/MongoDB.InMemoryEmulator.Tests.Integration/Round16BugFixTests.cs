@@ -49,10 +49,11 @@ public class Round16BugFixTests : IAsyncLifetime
 
     [Fact]
     [Trait(TestTraits.Target, TestTraits.All)]
-    public async Task Distinct_MissingField_IncludesNull()
+    public async Task Distinct_MissingField_DoesNotIncludeNull()
     {
         // Ref: https://www.mongodb.com/docs/manual/reference/command/distinct/
-        //   "If the field does not exist in a document, distinct returns null for that document."
+        //   Real MongoDB does NOT include null for documents where the field is missing.
+        //   Only explicitly null-valued fields contribute a null value.
         var col = _fixture.GetCollection<BsonDocument>("distinct_missing");
         await col.InsertManyAsync(new[]
         {
@@ -64,9 +65,9 @@ public class Round16BugFixTests : IAsyncLifetime
         var values = await col.DistinctAsync<BsonValue>("x", Builders<BsonDocument>.Filter.Empty);
         var results = await values.ToListAsync();
 
-        // Should include 10, null (for missing), 30
-        Assert.Equal(3, results.Count);
-        Assert.Contains(results, v => v == BsonNull.Value || v.IsBsonNull);
+        // Should include 10, 30 only — missing field does NOT contribute null
+        Assert.Equal(2, results.Count);
+        Assert.DoesNotContain(results, v => v == BsonNull.Value || v.IsBsonNull);
     }
 
     [Fact]
@@ -150,9 +151,10 @@ public class Round16BugFixTests : IAsyncLifetime
 
         Assert.Single(result);
         var values = result[0]["values"].AsBsonArray;
-        Assert.Equal(3, values.Count);
-        // Should contain 10, null (for missing), 30
-        Assert.Contains(values, v => v == BsonNull.Value || v.IsBsonNull);
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/push/
+        //   Real MongoDB $push does NOT include a value for documents where the field is missing.
+        Assert.Equal(2, values.Count);
+        Assert.DoesNotContain(values, v => v == BsonNull.Value || v.IsBsonNull);
     }
 
     #endregion

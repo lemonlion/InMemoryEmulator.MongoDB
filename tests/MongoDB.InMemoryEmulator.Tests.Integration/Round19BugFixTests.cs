@@ -24,10 +24,10 @@ public class Round19BugFixTests : IAsyncLifetime
 
     [Fact]
     [Trait(TestTraits.Target, TestTraits.All)]
-    public async Task GetField_WithNullInput_ReturnsNull()
+    public async Task GetField_WithNullInput_OmitsFieldFromOutput()
     {
-        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/getField/
-        //   "If the input argument resolves to null, $getField returns null."
+        // Ref: Observed real MongoDB 7.0:
+        //   When $getField input resolves to null/missing, the field is omitted from output entirely.
         var col = _fixture.GetCollection<BsonDocument>("r19_getfield_null");
         await col.InsertOneAsync(new BsonDocument { { "_id", 1 }, { "name", "test" } });
 
@@ -42,7 +42,8 @@ public class Round19BugFixTests : IAsyncLifetime
         };
 
         var results = await col.Aggregate<BsonDocument>(pipeline).ToListAsync();
-        Assert.True(results[0]["result"] == BsonNull.Value || results[0]["result"].IsBsonNull);
+        // Real MongoDB omits the field entirely — it doesn't appear in the output
+        Assert.False(results[0].Contains("result"));
     }
 
     #endregion

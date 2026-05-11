@@ -209,4 +209,20 @@ internal static class MongoErrors
             upserts
         ]);
     }
+
+    /// <summary>
+    /// Wraps a MongoCommandException as a MongoWriteException.
+    /// Real MongoDB returns write errors for single-document update/replace operations
+    /// as MongoWriteException (the driver internally uses BulkWrite and converts).
+    /// </summary>
+    /// <remarks>
+    /// Ref: https://www.mongodb.com/docs/drivers/csharp/current/fundamentals/crud/write-operations/
+    ///   "If the write operation fails, the driver throws a MongoWriteException."
+    /// </remarks>
+    internal static MongoWriteException WrapAsWriteError(MongoCommandException ex)
+    {
+        var code = ex.Result?.Contains("code") == true ? ex.Result["code"].AsInt32 : 2;
+        var writeError = CreateWriteError(ServerErrorCategory.Uncategorized, code, ex.Message);
+        return new MongoWriteException(SyntheticConnectionId, writeError, null, ex);
+    }
 }

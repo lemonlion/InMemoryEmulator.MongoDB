@@ -123,10 +123,10 @@ public class EdgeCaseBugFixTests : IAsyncLifetime
 
     [Fact]
     [Trait(TestTraits.Target, TestTraits.All)]
-    public async Task Aggregate_Substr_NegativeStart_ReturnsEmptyString()
+    public async Task Aggregate_Substr_NegativeStart_ThrowsError()
     {
-        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/substr/
-        //   "If <start> is a negative number, $substr returns an empty string."
+        // Ref: Observed real MongoDB 7.0:
+        //   "$substrBytes: starting index must be non-negative (got: -3)"
         var col = _fixture.GetCollection<BsonDocument>("substr_neg_1");
         await col.InsertOneAsync(new BsonDocument { { "_id", 1 }, { "text", "hello" } });
 
@@ -136,9 +136,8 @@ public class EdgeCaseBugFixTests : IAsyncLifetime
                 new BsonDocument("$substr", new BsonArray { "$text", -3, 2 })))
         };
 
-        var results = await col.Aggregate<BsonDocument>(pipeline).ToListAsync();
-        Assert.Single(results);
-        Assert.Equal("", results[0]["result"].AsString);
+        await Assert.ThrowsAnyAsync<MongoCommandException>(async () =>
+            await col.Aggregate<BsonDocument>(pipeline).ToListAsync());
     }
 
     [Fact]
@@ -191,10 +190,10 @@ public class EdgeCaseBugFixTests : IAsyncLifetime
 
     [Fact]
     [Trait(TestTraits.Target, TestTraits.All)]
-    public async Task Gt_WithNullOperand_MatchesMissingFieldCorrectly()
+    public async Task Gt_WithNullOperand_ReturnsNoResults()
     {
-        // Ref: https://www.mongodb.com/docs/manual/tutorial/query-for-null-fields/
-        //   "Comparison operators work with null values in a specific way."
+        // Ref: Observed real MongoDB 7.0:
+        //   {$gt: null} returns NO documents — nothing is "greater than" null in BSON comparison.
         var col = _fixture.GetCollection<BsonDocument>("cmp_null_1");
         await col.InsertManyAsync(new[]
         {
@@ -203,12 +202,11 @@ public class EdgeCaseBugFixTests : IAsyncLifetime
             new BsonDocument { { "_id", 3 } } // val is missing
         });
 
-        // $gt: null should match documents where val > null
+        // $gt: null should match NO documents in real MongoDB
         var filter = Builders<BsonDocument>.Filter.Gt("val", BsonNull.Value);
         var results = await col.Find(filter).ToListAsync();
 
-        Assert.Single(results);
-        Assert.Equal(1, results[0]["_id"].AsInt32); // 10 > null
+        Assert.Empty(results);
     }
 
     #endregion

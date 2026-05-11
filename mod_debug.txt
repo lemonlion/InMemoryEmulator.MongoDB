@@ -1,0 +1,6 @@
+MatchesField fieldPath=x condition={ "$mod" : [NumberLong(3), NumberLong(1)] } doc={ "_id" : 1, "x" : 10 }
+MatchesOperator op=$mod fieldValue=10 fieldExists=True operand=[3, 1]
+fieldValue=10 type=Int32 divisor=3 remainder=1 val=10 val%div=1 result=True
+MatchesField fieldPath=x condition={ "$mod" : [NumberLong(3), NumberLong(1)] } doc={ "_id" : 2, "x" : 10.00005 }
+MatchesOperator op=$mod fieldValue=10.00005 fieldExists=True operand=[3, 1]
+fieldValue=10.00005 type=Double divisor=3 remainder=1 val=10 val%div=1 result=True

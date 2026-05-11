@@ -33,7 +33,7 @@ public class Round14BugFixTests : IAsyncLifetime
 
         var update = new BsonDocument("$pop", new BsonDocument("value", 1));
 
-        await Assert.ThrowsAnyAsync<MongoCommandException>(async () =>
+        await Assert.ThrowsAnyAsync<MongoWriteException>(async () =>
             await col.UpdateOneAsync(
                 Builders<BsonDocument>.Filter.Eq("_id", 1),
                 new BsonDocumentUpdateDefinition<BsonDocument>(update)));
@@ -73,7 +73,7 @@ public class Round14BugFixTests : IAsyncLifetime
 
         var update = new BsonDocument("$pull", new BsonDocument("value", 42));
 
-        await Assert.ThrowsAnyAsync<MongoCommandException>(async () =>
+        await Assert.ThrowsAnyAsync<MongoWriteException>(async () =>
             await col.UpdateOneAsync(
                 Builders<BsonDocument>.Filter.Eq("_id", 1),
                 new BsonDocumentUpdateDefinition<BsonDocument>(update)));
@@ -94,7 +94,7 @@ public class Round14BugFixTests : IAsyncLifetime
 
         var update = new BsonDocument("$pullAll", new BsonDocument("value", new BsonArray { "text" }));
 
-        await Assert.ThrowsAnyAsync<MongoCommandException>(async () =>
+        await Assert.ThrowsAnyAsync<MongoWriteException>(async () =>
             await col.UpdateOneAsync(
                 Builders<BsonDocument>.Filter.Eq("_id", 1),
                 new BsonDocumentUpdateDefinition<BsonDocument>(update)));
@@ -115,7 +115,7 @@ public class Round14BugFixTests : IAsyncLifetime
 
         var update = Builders<BsonDocument>.Update.Inc("name", 1);
 
-        await Assert.ThrowsAnyAsync<MongoCommandException>(async () =>
+        await Assert.ThrowsAnyAsync<MongoWriteException>(async () =>
             await col.UpdateOneAsync(
                 Builders<BsonDocument>.Filter.Eq("_id", 1), update));
     }
@@ -135,7 +135,7 @@ public class Round14BugFixTests : IAsyncLifetime
 
         var update = new BsonDocument("$mul", new BsonDocument("name", 2));
 
-        await Assert.ThrowsAnyAsync<MongoCommandException>(async () =>
+        await Assert.ThrowsAnyAsync<MongoWriteException>(async () =>
             await col.UpdateOneAsync(
                 Builders<BsonDocument>.Filter.Eq("_id", 1),
                 new BsonDocumentUpdateDefinition<BsonDocument>(update)));
@@ -147,24 +147,20 @@ public class Round14BugFixTests : IAsyncLifetime
 
     [Fact]
     [Trait(TestTraits.Target, TestTraits.All)]
-    public async Task Rename_ToSameName_IsNoOp()
+    public async Task Rename_ToSameName_ThrowsError()
     {
         // Ref: https://www.mongodb.com/docs/manual/reference/operator/update/rename/
-        //   "The $rename operator logically performs an $unset of both the old name and the new name,
-        //    and then performs a $set on the target field with the value from the source field."
-        //   When old and new are the same, this is effectively a no-op but should not error.
+        //   "The source and target field for $rename must differ."
+        //   Real MongoDB throws an error when source and target are the same.
         var col = _fixture.GetCollection<BsonDocument>("rename_same_name");
         await col.InsertOneAsync(new BsonDocument { { "_id", 1 }, { "a", 10 } });
 
         var update = new BsonDocument("$rename", new BsonDocument("a", "a"));
 
-        // MongoDB allows this — it's a no-op
-        await col.UpdateOneAsync(
-            Builders<BsonDocument>.Filter.Eq("_id", 1),
-            new BsonDocumentUpdateDefinition<BsonDocument>(update));
-
-        var result = await col.Find(Builders<BsonDocument>.Filter.Eq("_id", 1)).FirstAsync();
-        Assert.Equal(10, result["a"].AsInt32);
+        await Assert.ThrowsAnyAsync<MongoWriteException>(async () =>
+            await col.UpdateOneAsync(
+                Builders<BsonDocument>.Filter.Eq("_id", 1),
+                new BsonDocumentUpdateDefinition<BsonDocument>(update)));
     }
 
     #endregion

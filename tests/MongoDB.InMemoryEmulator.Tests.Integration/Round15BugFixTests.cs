@@ -77,7 +77,7 @@ public class Round15BugFixTests : IAsyncLifetime
         var update = new BsonDocument("$bit", new BsonDocument("flags",
             new BsonDocument("or", 4)));
 
-        await Assert.ThrowsAnyAsync<MongoCommandException>(async () =>
+        await Assert.ThrowsAnyAsync<MongoWriteException>(async () =>
             await col.UpdateOneAsync(
                 Builders<BsonDocument>.Filter.Eq("_id", 1),
                 new BsonDocumentUpdateDefinition<BsonDocument>(update)));
@@ -142,7 +142,7 @@ public class Round15BugFixTests : IAsyncLifetime
 
         var update = new BsonDocument("$addToSet", new BsonDocument("value", "new"));
 
-        await Assert.ThrowsAnyAsync<MongoCommandException>(async () =>
+        await Assert.ThrowsAnyAsync<MongoWriteException>(async () =>
             await col.UpdateOneAsync(
                 Builders<BsonDocument>.Filter.Eq("_id", 1),
                 new BsonDocumentUpdateDefinition<BsonDocument>(update)));
@@ -163,7 +163,7 @@ public class Round15BugFixTests : IAsyncLifetime
 
         var update = new BsonDocument("$push", new BsonDocument("value", 99));
 
-        await Assert.ThrowsAnyAsync<MongoCommandException>(async () =>
+        await Assert.ThrowsAnyAsync<MongoWriteException>(async () =>
             await col.UpdateOneAsync(
                 Builders<BsonDocument>.Filter.Eq("_id", 1),
                 new BsonDocumentUpdateDefinition<BsonDocument>(update)));

@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.59] - 2025-07-11
+
+### Fixed
+- Update operations (`UpdateOne`/`UpdateMany`) now throw `MongoWriteException` instead of `MongoCommandException`, matching real MongoDB driver behavior
+- `$rename` to the same field name now correctly throws an error instead of being a no-op
+- `$push` with modifier documents (e.g. `$sort`, `$slice`) without `$each` now pushes the document as a literal value instead of throwing
+- `Distinct` no longer includes `null` for documents where the field is missing (matches real MongoDB behavior)
+- `$group`/`$bucket` `$push` and `$addToSet` accumulators now skip documents with missing fields instead of including `null`
+- `$toUpper`/`$toLower` on integer values now returns the string representation (e.g. `"123"`) instead of empty string
+- `$substrBytes` with negative start index now throws an error instead of returning empty string
+- `$gt: null` and `$lt: null` comparison operators now correctly return no matches (matching real MongoDB 7.0 behavior)
+- `$getField` with null/missing input now omits the field from output instead of returning `null`
+- `$merge` tests now create required unique indexes on custom `on` fields
+- Change stream test for `InsertMany` marked as InMemoryOnly (timing-dependent)
+
+### Changed
+- 14 integration tests updated to expect `MongoWriteException` instead of `MongoCommandException`
+
 ## [0.11.58] - 2025-07-11
 
 ### Fixed

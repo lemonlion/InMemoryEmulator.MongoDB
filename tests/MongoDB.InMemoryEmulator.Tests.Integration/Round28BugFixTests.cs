@@ -86,6 +86,11 @@ public class Round28BugFixTests : IAsyncLifetime
         var sourceCol = _fixture.GetCollection<BsonDocument>("merge_src");
         var targetCol = _fixture.GetCollection<BsonDocument>("merge_target_merge");
 
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/merge/
+        //   "The on field must have a unique index."
+        await targetCol.Indexes.CreateOneAsync(
+            new CreateIndexModel<BsonDocument>(new BsonDocument("name", 1), new CreateIndexOptions { Unique = true }));
+
         // Seed target collection
         await targetCol.InsertOneAsync(new BsonDocument
         {
@@ -103,8 +108,10 @@ public class Round28BugFixTests : IAsyncLifetime
         });
 
         // $merge with on: "name", whenMatched: "merge"
+        // Must $unset _id to avoid modifying immutable _id field in target
         var pipeline = new BsonDocument[]
         {
+            new("$unset", "_id"),
             new("$merge", new BsonDocument
             {
                 { "into", "merge_target_merge" },
@@ -131,6 +138,11 @@ public class Round28BugFixTests : IAsyncLifetime
         var sourceCol = _fixture.GetCollection<BsonDocument>("merge_src_repl");
         var targetCol = _fixture.GetCollection<BsonDocument>("merge_target_replace");
 
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/aggregation/merge/
+        //   "The on field must have a unique index."
+        await targetCol.Indexes.CreateOneAsync(
+            new CreateIndexModel<BsonDocument>(new BsonDocument("name", 1), new CreateIndexOptions { Unique = true }));
+
         await targetCol.InsertOneAsync(new BsonDocument
         {
             { "_id", "existing-id" },
@@ -148,6 +160,7 @@ public class Round28BugFixTests : IAsyncLifetime
 
         var pipeline = new BsonDocument[]
         {
+            new("$unset", "_id"),
             new("$merge", new BsonDocument
             {
                 { "into", "merge_target_replace" },
