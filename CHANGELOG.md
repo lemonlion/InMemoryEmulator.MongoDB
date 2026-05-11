@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.40] - 2026-05-10
+
+### Fixed
+- `$slice` projection now handles MongoDB driver's aggregation expression format (`["$field", count]`) — previously threw `FormatException` on `$scores`
+- `$slice` projection is correctly treated as mode-neutral (exclusion by default) — previously forced inclusion mode
+- `$slice` and `$elemMatch` projections now support dot-notation for nested arrays
+- Duplicate index key detection: creating an index with same key but different name now correctly throws `MongoCommandException` (code 86) — previously allowed silent duplicates
+- `MongoCommandException` in index manager now uses `SyntheticConnectionId` instead of `null` — previously threw `ArgumentNullException`
+
+### Added
+- `$jsonSchema` filter now supports `allOf`, `anyOf`, `oneOf`, and `not` composition operators — previously silently ignored
+- 13 new integration tests covering all fixes and new features
+
 ## [0.11.39] - 2026-05-10
 
 ### Fixed

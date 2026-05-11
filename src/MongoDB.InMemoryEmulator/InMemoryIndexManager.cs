@@ -64,6 +64,17 @@ public class InMemoryIndexManager<TDocument> : IMongoIndexManager<TDocument>
                 return indexName;
             }
 
+            // Ref: https://www.mongodb.com/docs/manual/reference/command/createIndexes/#behaviors
+            //   "If you create an index with the same key specification but a different name, error 86."
+            var existingByKey = _indexes.FirstOrDefault(idx => idx["key"].AsBsonDocument.Equals(rendered) && idx["name"].AsString != "_id_");
+            if (existingByKey != null)
+            {
+                throw new MongoCommandException(
+                    MongoErrors.SyntheticConnectionId,
+                    $"Index already exists with a different name: {existingByKey["name"].AsString}",
+                    new BsonDocument { { "ok", 0 }, { "code", 86 }, { "errmsg", $"Index already exists with a different name: {existingByKey["name"].AsString}" } });
+            }
+
             var indexDoc = new BsonDocument
             {
                 { "v", 2 },

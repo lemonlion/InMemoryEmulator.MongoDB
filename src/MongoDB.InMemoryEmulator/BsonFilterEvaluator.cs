@@ -900,6 +900,43 @@ internal static class BsonFilterEvaluator
         if (schema.Contains("maxProperties") && document.ElementCount > schema["maxProperties"].ToInt32())
             return false;
 
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/jsonSchema/
+        //   "allOf: Must match ALL of the given schemas."
+        if (schema.Contains("allOf") && schema["allOf"].IsBsonArray)
+        {
+            foreach (var subSchema in schema["allOf"].AsBsonArray)
+            {
+                if (!MatchesJsonSchema(document, subSchema.AsBsonDocument))
+                    return false;
+            }
+        }
+
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/jsonSchema/
+        //   "anyOf: Must match at least ONE of the given schemas."
+        if (schema.Contains("anyOf") && schema["anyOf"].IsBsonArray)
+        {
+            var matched = schema["anyOf"].AsBsonArray.Any(s => MatchesJsonSchema(document, s.AsBsonDocument));
+            if (!matched)
+                return false;
+        }
+
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/jsonSchema/
+        //   "oneOf: Must match exactly ONE of the given schemas."
+        if (schema.Contains("oneOf") && schema["oneOf"].IsBsonArray)
+        {
+            var matchCount = schema["oneOf"].AsBsonArray.Count(s => MatchesJsonSchema(document, s.AsBsonDocument));
+            if (matchCount != 1)
+                return false;
+        }
+
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/query/jsonSchema/
+        //   "not: Must NOT match the given schema."
+        if (schema.Contains("not") && schema["not"].IsBsonDocument)
+        {
+            if (MatchesJsonSchema(document, schema["not"].AsBsonDocument))
+                return false;
+        }
+
         return true;
     }
 

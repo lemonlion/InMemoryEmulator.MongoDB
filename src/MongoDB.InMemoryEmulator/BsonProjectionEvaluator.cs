@@ -56,7 +56,10 @@ internal static class BsonProjectionEvaluator
             bool elementIsInclusion;
             if (element.Value.IsBsonDocument)
             {
-                // Projection operators ($elemMatch, $slice, $meta) are inclusion
+                var opDoc = element.Value.AsBsonDocument;
+                // $slice is mode-neutral; $elemMatch/$meta are inclusion
+                if (opDoc.Contains("$slice"))
+                    continue;
                 elementIsInclusion = true;
             }
             else
@@ -88,7 +91,13 @@ internal static class BsonProjectionEvaluator
 
             if (element.Value.IsBsonDocument)
             {
-                // Projection operators like $elemMatch, $slice, $meta are inclusion mode
+                var opDoc = element.Value.AsBsonDocument;
+                // Ref: https://www.mongodb.com/docs/manual/reference/operator/projection/slice/
+                //   "The $slice projection by itself is considered an exclusion."
+                //   $slice alone doesn't force inclusion mode; only $elemMatch/$meta do.
+                if (opDoc.Contains("$slice"))
+                    continue; // $slice is mode-neutral, check other fields
+                // $elemMatch and $meta force inclusion mode
                 return ProjectionMode.Inclusion;
             }
 
@@ -96,14 +105,15 @@ internal static class BsonProjectionEvaluator
             return val == 1 ? ProjectionMode.Inclusion : ProjectionMode.Exclusion;
         }
 
-        // Only _id projection — treat as exclusion (or inclusion of _id only)
+        // Only _id projection or only $slice — treat as exclusion
         if (projection.Contains("_id"))
         {
             var idVal = projection["_id"].IsNumeric ? projection["_id"].ToInt32() : (projection["_id"].AsBoolean ? 1 : 0);
             return idVal == 0 ? ProjectionMode.Exclusion : ProjectionMode.Inclusion;
         }
 
-        return ProjectionMode.Inclusion;
+        // Only $slice projections with no other specs → exclusion mode
+        return ProjectionMode.Exclusion;
     }
 
     /// <summary>
@@ -156,8 +166,16 @@ internal static class BsonProjectionEvaluator
     private static BsonDocument ApplyExclusion(BsonDocument doc, BsonDocument projection)
     {
         var excludedFields = new HashSet<string>();
+        var sliceFields = new Dictionary<string, BsonValue>();
         foreach (var element in projection)
         {
+            if (element.Value.IsBsonDocument)
+            {
+                var opDoc = element.Value.AsBsonDocument;
+                if (opDoc.Contains("$slice"))
+                    sliceFields[element.Name] = opDoc["$slice"];
+                continue;
+            }
             var val = element.Value.IsNumeric ? element.Value.ToInt32() : (element.Value.AsBoolean ? 1 : 0);
             if (val == 0)
                 excludedFields.Add(element.Name);
@@ -186,6 +204,14 @@ internal static class BsonProjectionEvaluator
         foreach (var field in dotNotation)
         {
             RemoveNestedField(result, field);
+        }
+
+        // Apply $slice operators in exclusion mode
+        // Ref: https://www.mongodb.com/docs/manual/reference/operator/projection/slice/
+        //   "$slice by itself is considered an exclusion" — all fields returned, array sliced.
+        foreach (var (field, sliceSpec) in sliceFields)
+        {
+            ApplySlice(doc, result, field, sliceSpec);
         }
 
         return result;
@@ -339,32 +365,76 @@ internal static class BsonProjectionEvaluator
     /// </remarks>
     private static void ApplySlice(BsonDocument doc, BsonDocument result, string field, BsonValue sliceSpec)
     {
-        if (!doc.Contains(field) || !doc[field].IsBsonArray)
+        // Support dot-notation: resolve path through nested documents
+        var arrayValue = BsonFilterEvaluator.ResolveFieldPath(doc, field);
+        if (arrayValue == BsonNull.Value || !arrayValue.IsBsonArray)
         {
-            if (doc.Contains(field))
+            // If field exists but isn't array, include as-is
+            if (arrayValue != BsonNull.Value && field.Contains('.'))
+                SetNestedField(result, field, arrayValue);
+            else if (doc.Contains(field))
                 result[field] = doc[field];
             return;
         }
 
-        var array = doc[field].AsBsonArray;
+        var array = arrayValue.AsBsonArray;
+        BsonArray sliced;
 
         if (sliceSpec.IsNumeric)
         {
             var n = sliceSpec.ToInt32();
             if (n >= 0)
-                result[field] = new BsonArray(array.Take(n));
+                sliced = new BsonArray(array.Take(n));
             else
-                result[field] = new BsonArray(array.Skip(Math.Max(0, array.Count + n)));
+                sliced = new BsonArray(array.Skip(Math.Max(0, array.Count + n)));
         }
         else if (sliceSpec.IsBsonArray)
         {
             var arr = sliceSpec.AsBsonArray;
-            var skip = arr[0].ToInt32();
-            var limit = arr[1].ToInt32();
-            if (skip < 0)
-                skip = Math.Max(0, array.Count + skip);
-            result[field] = new BsonArray(array.Skip(skip).Take(limit));
+            // The MongoDB driver renders $slice in aggregation expression format:
+            //   { $slice: ["$field", count] } or { $slice: ["$field", skip, count] }
+            // Legacy format: { $slice: [skip, count] } where both are integers
+            if (arr.Count >= 2 && arr[0].IsString && arr[0].AsString.StartsWith("$"))
+            {
+                // Aggregation expression format: ["$field", count] or ["$field", skip, count]
+                if (arr.Count == 2)
+                {
+                    var n = arr[1].ToInt32();
+                    if (n >= 0)
+                        sliced = new BsonArray(array.Take(n));
+                    else
+                        sliced = new BsonArray(array.Skip(Math.Max(0, array.Count + n)));
+                }
+                else
+                {
+                    // ["$field", skip, count]
+                    var skip = arr[1].ToInt32();
+                    var limit = arr[2].ToInt32();
+                    if (skip < 0)
+                        skip = Math.Max(0, array.Count + skip);
+                    sliced = new BsonArray(array.Skip(skip).Take(limit));
+                }
+            }
+            else
+            {
+                // Legacy format: [skip, count]
+                var skip = arr[0].ToInt32();
+                var limit = arr[1].ToInt32();
+                if (skip < 0)
+                    skip = Math.Max(0, array.Count + skip);
+                sliced = new BsonArray(array.Skip(skip).Take(limit));
+            }
         }
+        else
+        {
+            return;
+        }
+
+        // Set the sliced array at the correct path
+        if (field.Contains('.'))
+            SetNestedField(result, field, sliced);
+        else
+            result[field] = sliced;
     }
 
     /// <summary>
@@ -376,10 +446,12 @@ internal static class BsonProjectionEvaluator
     /// </remarks>
     private static void ApplyElemMatch(BsonDocument doc, BsonDocument result, string field, BsonDocument filter)
     {
-        if (!doc.Contains(field) || !doc[field].IsBsonArray)
+        // Support dot-notation: resolve path through nested documents
+        var arrayValue = BsonFilterEvaluator.ResolveFieldPath(doc, field);
+        if (arrayValue == BsonNull.Value || !arrayValue.IsBsonArray)
             return;
 
-        var array = doc[field].AsBsonArray;
+        var array = arrayValue.AsBsonArray;
         foreach (var element in array)
         {
             // Ref: https://www.mongodb.com/docs/manual/reference/operator/projection/elemMatch/
@@ -389,7 +461,11 @@ internal static class BsonProjectionEvaluator
             {
                 if (BsonFilterEvaluator.Matches(element.AsBsonDocument, filter))
                 {
-                    result[field] = new BsonArray { element };
+                    var matched = new BsonArray { element };
+                    if (field.Contains('.'))
+                        SetNestedField(result, field, matched);
+                    else
+                        result[field] = matched;
                     return;
                 }
             }
@@ -401,12 +477,32 @@ internal static class BsonProjectionEvaluator
                 var wrappedFilter = new BsonDocument("_v", filter);
                 if (BsonFilterEvaluator.Matches(wrapper, wrappedFilter))
                 {
-                    result[field] = new BsonArray { element };
+                    var matched = new BsonArray { element };
+                    if (field.Contains('.'))
+                        SetNestedField(result, field, matched);
+                    else
+                        result[field] = matched;
                     return;
                 }
             }
         }
 
         // No match — field not included
+    }
+
+    /// <summary>
+    /// Sets a value at a dot-notation path in the result document, creating intermediate documents as needed.
+    /// </summary>
+    private static void SetNestedField(BsonDocument doc, string dotPath, BsonValue value)
+    {
+        var parts = dotPath.Split('.');
+        var current = doc;
+        for (int i = 0; i < parts.Length - 1; i++)
+        {
+            if (!current.Contains(parts[i]) || !current[parts[i]].IsBsonDocument)
+                current[parts[i]] = new BsonDocument();
+            current = current[parts[i]].AsBsonDocument;
+        }
+        current[parts[^1]] = value;
     }
 }
