@@ -80,7 +80,8 @@ public class JavaScriptExpressionTests : IDisposable
                 { "body", "function(a, b) { return a + b; }" },
                 { "args", new BsonArray { "$x", "$y" } },
                 { "lang", "js" }
-            })))
+            }))),
+            new BsonDocument("$sort", new BsonDocument("sum", 1))
         };
 
         var results = col.Aggregate<BsonDocument>(pipeline).ToList();

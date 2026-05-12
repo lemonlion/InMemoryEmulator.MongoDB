@@ -4,12 +4,12 @@
 	<!-- Shared NuGet package metadata for all source (packable) projects -->
 	<PropertyGroup>
 		<IsPackable>true</IsPackable>
-		<Version>0.11.60</Version>
+		<Version>0.11.59</Version>
 		<Authors>lemonlion</Authors>
 		<Copyright>Copyright (c) 2026 lemonlion</Copyright>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
-		<PackageProjectUrl>https://github.com/lemonlion/InMemoryEmulator.MongoDB</PackageProjectUrl>
-		<RepositoryUrl>https://github.com/lemonlion/InMemoryEmulator.MongoDB</RepositoryUrl>
+		<PackageProjectUrl>https://github.com/lemonlion/MongoDB.InMemoryEmulator</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/lemonlion/MongoDB.InMemoryEmulator</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 	</PropertyGroup>
 
