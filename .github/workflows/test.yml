@@ -23,7 +23,7 @@ jobs:
           dotnet list package --vulnerable --include-transitive 2>&1 | tee vulnerability-report.txt
           # SharpCompress (GHSA-6c8g-7p36-r338) has no patched version; transitive dep from MongoDB.Driver, unused by this project
           ! grep -v 'SharpCompress' vulnerability-report.txt | grep -q '> '
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results-inmemory
@@ -52,7 +52,7 @@ jobs:
         env:
           MONGO_TEST_TARGET: mongodb
           MONGO_CONNECTION_STRING: "mongodb://localhost:27017/?replicaSet=rs0&directConnection=true"
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results-mongodb
