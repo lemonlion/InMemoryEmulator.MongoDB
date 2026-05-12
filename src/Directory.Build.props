@@ -8,8 +8,8 @@
 		<Authors>lemonlion</Authors>
 		<Copyright>Copyright (c) 2026 lemonlion</Copyright>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
-		<PackageProjectUrl>https://github.com/lemonlion/MongoDB.InMemoryEmulator</PackageProjectUrl>
-		<RepositoryUrl>https://github.com/lemonlion/MongoDB.InMemoryEmulator</RepositoryUrl>
+		<PackageProjectUrl>https://github.com/lemonlion/InMemoryEmulator.MongoDB</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/lemonlion/InMemoryEmulator.MongoDB</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 	</PropertyGroup>
 

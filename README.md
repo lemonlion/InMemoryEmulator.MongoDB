@@ -1,6 +1,6 @@
-# <img src="icon.svg" width="32" height="32" alt="MongoDB.InMemoryEmulator icon" style="vertical-align: middle;"> MongoDB.InMemoryEmulator
+# <img src="icon.svg" width="32" height="32" alt="InMemoryEmulator.MongoDB icon" style="vertical-align: middle;"> InMemoryEmulator.MongoDB
 
-[![NuGet](https://img.shields.io/nuget/v/MongoDB.InMemoryEmulator.svg)](https://www.nuget.org/packages/MongoDB.InMemoryEmulator/)
+[![NuGet](https://img.shields.io/nuget/v/InMemoryEmulator.MongoDB.svg)](https://www.nuget.org/packages/InMemoryEmulator.MongoDB/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A high-fidelity, in-process fake for the **MongoDB .NET/C# Driver** — zero Docker, zero network, instant startup.
@@ -15,7 +15,7 @@ A high-fidelity, in-process fake for the **MongoDB .NET/C# Driver** — zero Doc
 ## Quick Start
 
 ```
-dotnet add package MongoDB.InMemoryEmulator
+dotnet add package InMemoryEmulator.MongoDB
 ```
 
 ### Unit Tests
@@ -60,20 +60,20 @@ services.UseInMemoryMongoDB(options =>
 
 | Framework | Package | Description | NuGet |
 |---|---|---|---|
-| **Core library** | `MongoDB.InMemoryEmulator` | Primary features | [![NuGet Version](https://img.shields.io/nuget/v/MongoDB.InMemoryEmulator)](https://www.nuget.org/packages/MongoDB.InMemoryEmulator) |
-| **JavaScript Triggers** | `MongoDB.InMemoryEmulator.JsTriggers` | `$function`, `$accumulator`, `$where` via Jint | [![NuGet Version](https://img.shields.io/nuget/v/MongoDB.InMemoryEmulator.JsTriggers)](https://www.nuget.org/packages/MongoDB.InMemoryEmulator.JsTriggers) |
+| **Core library** | `InMemoryEmulator.MongoDB` | Primary features | [![NuGet Version](https://img.shields.io/nuget/v/InMemoryEmulator.MongoDB)](https://www.nuget.org/packages/InMemoryEmulator.MongoDB) |
+| **JavaScript Triggers** | `InMemoryEmulator.MongoDB.JsTriggers` | `$function`, `$accumulator`, `$where` via Jint | [![NuGet Version](https://img.shields.io/nuget/v/InMemoryEmulator.MongoDB.JsTriggers)](https://www.nuget.org/packages/InMemoryEmulator.MongoDB.JsTriggers) |
 
 ## Documentation
 
-See the [Wiki](https://github.com/lemonlion/MongoDB.InMemoryEmulator/wiki) for full documentation:
+See the [Wiki](https://github.com/lemonlion/InMemoryEmulator.MongoDB/wiki) for full documentation:
 
-- [Getting Started](https://github.com/lemonlion/MongoDB.InMemoryEmulator/wiki/Getting-Started)
-- [Setup Guide](https://github.com/lemonlion/MongoDB.InMemoryEmulator/wiki/Setup-Guide) (5 DI patterns)
-- [Features](https://github.com/lemonlion/MongoDB.InMemoryEmulator/wiki/Features)
-- [Filter & Update Operators](https://github.com/lemonlion/MongoDB.InMemoryEmulator/wiki/Filter-Update-Operators)
-- [Aggregation Pipeline](https://github.com/lemonlion/MongoDB.InMemoryEmulator/wiki/Aggregation-Pipeline) (34 stages)
-- [Migration Guide](https://github.com/lemonlion/MongoDB.InMemoryEmulator/wiki/Migration-Guide) (from Mongo2Go / Testcontainers)
-- [Known Limitations](https://github.com/lemonlion/MongoDB.InMemoryEmulator/wiki/Known-Limitations)
+- [Getting Started](https://github.com/lemonlion/InMemoryEmulator.MongoDB/wiki/Getting-Started)
+- [Setup Guide](https://github.com/lemonlion/InMemoryEmulator.MongoDB/wiki/Setup-Guide) (5 DI patterns)
+- [Features](https://github.com/lemonlion/InMemoryEmulator.MongoDB/wiki/Features)
+- [Filter & Update Operators](https://github.com/lemonlion/InMemoryEmulator.MongoDB/wiki/Filter-Update-Operators)
+- [Aggregation Pipeline](https://github.com/lemonlion/InMemoryEmulator.MongoDB/wiki/Aggregation-Pipeline) (34 stages)
+- [Migration Guide](https://github.com/lemonlion/InMemoryEmulator.MongoDB/wiki/Migration-Guide) (from Mongo2Go / Testcontainers)
+- [Known Limitations](https://github.com/lemonlion/InMemoryEmulator.MongoDB/wiki/Known-Limitations)
 
 ## Requirements
 

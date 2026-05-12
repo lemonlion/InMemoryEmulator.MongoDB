@@ -606,7 +606,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Capped collections with `max` and `size` document limits
 - Tailable cursors via `Channel<T>` cross-thread notification
 - JavaScript expression support (`$function`, `$accumulator`, `$where`) via Jint
-- `MongoDB.InMemoryEmulator.JsTriggers` optional package
+- `InMemoryEmulator.MongoDB.JsTriggers` optional package
 
 ## [0.7.0] - 2025-07-17
 
