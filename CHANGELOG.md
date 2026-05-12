@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2025-07-12
+
+### Changed
+- **BREAKING**: Upgraded MongoDB.Driver from 2.30.0 to 3.8.1
+- Removed separate MongoDB.Driver.GridFS package reference (now included in MongoDB.Driver 3.x)
+- Updated `SdkVersionDriftDetector` tested version range to 3.0.0–3.8.1
+
+### Added
+- `IMongoClient.BulkWrite`/`BulkWriteAsync` stubs (client-level bulk write, throws `NotSupportedException`)
+- `IDisposable.Dispose()` on `InMemoryMongoClient` (no-op, required by `IMongoClient` in 3.x)
+
+### Fixed
+- `ArrayFilterDefinition.Render()` call updated to remove removed `LinqProvider` parameter
+
 ## [0.11.61] - 2025-07-12
 
 ### Fixed

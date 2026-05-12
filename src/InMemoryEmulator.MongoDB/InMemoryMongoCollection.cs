@@ -1571,7 +1571,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
         if (arrayFilters == null) return null;
         var registry = BsonSerializer.SerializerRegistry;
         return arrayFilters
-            .Select(af => af.Render(registry.GetSerializer<BsonDocument>(), registry, global::MongoDB.Driver.Linq.LinqProvider.V3))
+            .Select(af => af.Render(registry.GetSerializer<BsonDocument>(), registry))
             .ToList();
     }
 

@@ -221,4 +221,32 @@ public class InMemoryMongoClient : IMongoClient
     }
 
     #endregion
+
+    #region Client-level BulkWrite
+
+    // Ref: https://www.mongodb.com/docs/manual/reference/command/bulkWrite/
+    //   "New in version 8.0. Client-level bulk write across multiple namespaces."
+
+    public ClientBulkWriteResult BulkWrite(IReadOnlyList<BulkWriteModel> models, ClientBulkWriteOptions? options = null, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Client-level bulk write is not yet supported by the in-memory emulator. Use collection-level BulkWrite instead.");
+
+    public ClientBulkWriteResult BulkWrite(IClientSessionHandle session, IReadOnlyList<BulkWriteModel> models, ClientBulkWriteOptions? options = null, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Client-level bulk write is not yet supported by the in-memory emulator. Use collection-level BulkWrite instead.");
+
+    public Task<ClientBulkWriteResult> BulkWriteAsync(IReadOnlyList<BulkWriteModel> models, ClientBulkWriteOptions? options = null, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Client-level bulk write is not yet supported by the in-memory emulator. Use collection-level BulkWrite instead.");
+
+    public Task<ClientBulkWriteResult> BulkWriteAsync(IClientSessionHandle session, IReadOnlyList<BulkWriteModel> models, ClientBulkWriteOptions? options = null, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Client-level bulk write is not yet supported by the in-memory emulator. Use collection-level BulkWrite instead.");
+
+    #endregion
+
+    #region IDisposable
+
+    public void Dispose()
+    {
+        // No-op: in-memory emulator has no external resources to release.
+    }
+
+    #endregion
 }

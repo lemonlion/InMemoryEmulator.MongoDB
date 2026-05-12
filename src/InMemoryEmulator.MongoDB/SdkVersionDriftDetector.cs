@@ -13,8 +13,8 @@ namespace InMemoryEmulator.MongoDB;
 /// </remarks>
 public static class SdkVersionDriftDetector
 {
-    private static readonly Version MinTestedVersion = new(2, 28, 0, 0);
-    private static readonly Version MaxTestedVersion = new(2, 30, 0, 0);
+    private static readonly Version MinTestedVersion = new(3, 0, 0, 0);
+    private static readonly Version MaxTestedVersion = new(3, 8, 1, 0);
 
     /// <summary>
     /// Checks the current global::MongoDB.Driver version and returns a warning if it's outside the tested range.

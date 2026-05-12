@@ -45,14 +45,14 @@ public class SdkVersionDriftDetectorTests
     [Fact]
     public void Current_driver_version_is_within_tested_range()
     {
-        // The driver assembly version should be between 2.28.0.0 and 2.30.0.0
+        // The driver assembly version should be between 3.0.0.0 and 3.8.1.0
         var driverAssembly = typeof(IMongoClient).Assembly;
         var version = driverAssembly.GetName().Version;
         Assert.NotNull(version);
-        Assert.True(version >= new Version(2, 28, 0, 0),
-            $"Driver version {version} is below minimum 2.28.0.0");
-        Assert.True(version <= new Version(2, 30, 0, 0),
-            $"Driver version {version} is above maximum 2.30.0.0");
+        Assert.True(version >= new Version(3, 0, 0, 0),
+            $"Driver version {version} is below minimum 3.0.0.0");
+        Assert.True(version <= new Version(3, 8, 1, 0),
+            $"Driver version {version} is above maximum 3.8.1.0");
     }
 
     [Fact]
