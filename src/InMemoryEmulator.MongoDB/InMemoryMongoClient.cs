@@ -18,10 +18,33 @@ public class InMemoryMongoClient : IMongoClient
 {
     private readonly ConcurrentDictionary<string, InMemoryMongoDatabase> _databases = new();
     internal readonly ChangeStreamNotifier ChangeNotifier = new();
+    internal readonly CommandEventEmitter? CommandEventEmitter;
 
     public InMemoryMongoClient(MongoClientSettings? settings = null)
     {
         Settings = settings ?? MongoClientSettings.FromConnectionString("mongodb://localhost:27017");
+    }
+
+    /// <summary>
+    /// Creates an in-memory client with command event subscriptions.
+    /// </summary>
+    /// <param name="commandEventSubscribers">
+    /// Configurator for subscribing to <see cref="global::MongoDB.Driver.Core.Events.CommandStartedEvent"/>,
+    /// <see cref="global::MongoDB.Driver.Core.Events.CommandSucceededEvent"/>, and
+    /// <see cref="global::MongoDB.Driver.Core.Events.CommandFailedEvent"/>.
+    /// </param>
+    /// <param name="settings">Optional client settings.</param>
+    /// <remarks>
+    /// Ref: https://www.mongodb.com/docs/drivers/csharp/current/fundamentals/logging/
+    ///   "Use MongoClientSettings.ClusterConfigurator to subscribe to command events."
+    /// </remarks>
+    public InMemoryMongoClient(Action<CommandEventSubscriptionBuilder> commandEventSubscribers, MongoClientSettings? settings = null)
+        : this(settings)
+    {
+        if (commandEventSubscribers != null)
+        {
+            CommandEventEmitter = new CommandEventEmitter(commandEventSubscribers);
+        }
     }
 
     public MongoClientSettings Settings { get; }

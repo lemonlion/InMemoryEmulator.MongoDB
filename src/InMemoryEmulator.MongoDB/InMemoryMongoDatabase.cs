@@ -80,7 +80,8 @@ public class InMemoryMongoDatabase : IMongoDatabase
 
         var store = GetOrCreateStore(name);
         var collNs = new CollectionNamespace(DatabaseNamespace, name);
-        return new InMemoryMongoCollection<TDocument>(collNs, this, store, settings);
+        var commandEventEmitter = (Client as InMemoryMongoClient)?.CommandEventEmitter;
+        return new InMemoryMongoCollection<TDocument>(collNs, this, store, settings, commandEventEmitter: commandEventEmitter);
     }
 
     #endregion

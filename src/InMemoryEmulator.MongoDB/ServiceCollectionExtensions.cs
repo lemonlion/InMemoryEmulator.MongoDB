@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using global::MongoDB.Driver;
+using global::MongoDB.Driver.Core.Events;
 
 namespace InMemoryEmulator.MongoDB;
 
@@ -29,7 +30,9 @@ public static class ServiceCollectionExtensions
         var options = new InMemoryMongoOptions();
         configure?.Invoke(options);
 
-        var client = new InMemoryMongoClient();
+        var client = options.ClusterConfigurator != null
+            ? new InMemoryMongoClient(commandEventSubscribers: options.ClusterConfigurator)
+            : new InMemoryMongoClient();
         var db = (InMemoryMongoDatabase)client.GetDatabase(options.DatabaseName);
 
         // Replace IMongoClient
@@ -104,6 +107,21 @@ public class InMemoryMongoOptions
     /// Callback invoked after the in-memory database is created.
     /// </summary>
     public Action<InMemoryMongoDatabase>? OnDatabaseCreated { get; set; }
+
+    /// <summary>
+    /// Optional configurator for subscribing to command monitoring events.
+    /// Mirrors <see cref="MongoClientSettings.ClusterConfigurator"/> in concept.
+    /// <para>
+    /// When set, the emulator emits synthetic <see cref="CommandStartedEvent"/>,
+    /// <see cref="CommandSucceededEvent"/>, and <see cref="CommandFailedEvent"/>
+    /// for each operation performed on any collection.
+    /// </para>
+    /// </summary>
+    /// <remarks>
+    /// Ref: https://www.mongodb.com/docs/drivers/csharp/current/fundamentals/logging/
+    ///   "Use MongoClientSettings.ClusterConfigurator to subscribe to command events."
+    /// </remarks>
+    public Action<CommandEventSubscriptionBuilder>? ClusterConfigurator { get; set; }
 
     /// <summary>
     /// Register a collection to be available via DI.
