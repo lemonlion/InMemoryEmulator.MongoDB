@@ -456,4 +456,294 @@ public class CommandMonitoringTests
             return false;
         }
     }
+
+    #region Reply content tests
+
+    [Fact]
+    public void InsertOne_reply_contains_n()
+    {
+        var succeededEvents = new List<CommandSucceededEvent>();
+        var client = new InMemoryMongoClient(commandEventSubscribers: builder =>
+            builder.Subscribe<CommandSucceededEvent>(e => succeededEvents.Add(e)));
+        var col = client.GetDatabase("testdb").GetCollection<BsonDocument>("orders");
+
+        col.InsertOne(new BsonDocument { { "_id", 1 }, { "item", "widget" } });
+
+        var reply = succeededEvents.Single().Reply;
+        Assert.Equal(1, reply["ok"].AsInt32);
+        Assert.Equal(1, reply["n"].AsInt32);
+    }
+
+    [Fact]
+    public void Find_reply_contains_cursor_with_firstBatch()
+    {
+        var succeededEvents = new List<CommandSucceededEvent>();
+        var client = new InMemoryMongoClient(commandEventSubscribers: builder =>
+            builder.Subscribe<CommandSucceededEvent>(e => succeededEvents.Add(e)));
+        var col = client.GetDatabase("testdb").GetCollection<BsonDocument>("orders");
+        col.InsertOne(new BsonDocument { { "_id", 1 }, { "item", "widget" } });
+        col.InsertOne(new BsonDocument { { "_id", 2 }, { "item", "gadget" } });
+        succeededEvents.Clear();
+
+        col.Find(Builders<BsonDocument>.Filter.Empty).ToList();
+
+        var reply = succeededEvents.Single().Reply;
+        Assert.Equal(1, reply["ok"].AsInt32);
+        Assert.True(reply.Contains("cursor"), "Reply should contain 'cursor'");
+        var cursor = reply["cursor"].AsBsonDocument;
+        Assert.True(cursor.Contains("firstBatch"), "cursor should contain 'firstBatch'");
+        var firstBatch = cursor["firstBatch"].AsBsonArray;
+        Assert.Equal(2, firstBatch.Count);
+        Assert.Equal("widget", firstBatch[0].AsBsonDocument["item"].AsString);
+        Assert.Equal("gadget", firstBatch[1].AsBsonDocument["item"].AsString);
+        Assert.Equal(0L, cursor["id"].AsInt64);
+        Assert.Equal("testdb.orders", cursor["ns"].AsString);
+    }
+
+    [Fact]
+    public void Find_with_filter_reply_contains_only_matching_docs()
+    {
+        var succeededEvents = new List<CommandSucceededEvent>();
+        var client = new InMemoryMongoClient(commandEventSubscribers: builder =>
+            builder.Subscribe<CommandSucceededEvent>(e => succeededEvents.Add(e)));
+        var col = client.GetDatabase("testdb").GetCollection<BsonDocument>("orders");
+        col.InsertOne(new BsonDocument { { "_id", 1 }, { "item", "widget" } });
+        col.InsertOne(new BsonDocument { { "_id", 2 }, { "item", "gadget" } });
+        succeededEvents.Clear();
+
+        col.Find(Builders<BsonDocument>.Filter.Eq("_id", 1)).ToList();
+
+        var reply = succeededEvents.Single().Reply;
+        var firstBatch = reply["cursor"]["firstBatch"].AsBsonArray;
+        Assert.Single(firstBatch);
+        Assert.Equal("widget", firstBatch[0].AsBsonDocument["item"].AsString);
+    }
+
+    [Fact]
+    public void Find_empty_result_reply_contains_empty_firstBatch()
+    {
+        var succeededEvents = new List<CommandSucceededEvent>();
+        var client = new InMemoryMongoClient(commandEventSubscribers: builder =>
+            builder.Subscribe<CommandSucceededEvent>(e => succeededEvents.Add(e)));
+        var col = client.GetDatabase("testdb").GetCollection<BsonDocument>("orders");
+        succeededEvents.Clear();
+
+        col.Find(Builders<BsonDocument>.Filter.Empty).ToList();
+
+        var reply = succeededEvents.Single().Reply;
+        var firstBatch = reply["cursor"]["firstBatch"].AsBsonArray;
+        Assert.Empty(firstBatch);
+    }
+
+    [Fact]
+    public void DeleteOne_reply_contains_n()
+    {
+        var succeededEvents = new List<CommandSucceededEvent>();
+        var client = new InMemoryMongoClient(commandEventSubscribers: builder =>
+            builder.Subscribe<CommandSucceededEvent>(e => succeededEvents.Add(e)));
+        var col = client.GetDatabase("testdb").GetCollection<BsonDocument>("orders");
+        col.InsertOne(new BsonDocument { { "_id", 1 } });
+        succeededEvents.Clear();
+
+        col.DeleteOne(Builders<BsonDocument>.Filter.Eq("_id", 1));
+
+        var reply = succeededEvents.Single().Reply;
+        Assert.Equal(1, reply["ok"].AsInt32);
+        Assert.Equal(1, reply["n"].AsInt32);
+    }
+
+    [Fact]
+    public void DeleteMany_reply_contains_n()
+    {
+        var succeededEvents = new List<CommandSucceededEvent>();
+        var client = new InMemoryMongoClient(commandEventSubscribers: builder =>
+            builder.Subscribe<CommandSucceededEvent>(e => succeededEvents.Add(e)));
+        var col = client.GetDatabase("testdb").GetCollection<BsonDocument>("orders");
+        col.InsertOne(new BsonDocument { { "_id", 1 } });
+        col.InsertOne(new BsonDocument { { "_id", 2 } });
+        succeededEvents.Clear();
+
+        col.DeleteMany(Builders<BsonDocument>.Filter.Empty);
+
+        var reply = succeededEvents.Single().Reply;
+        Assert.Equal(1, reply["ok"].AsInt32);
+        Assert.Equal(2, reply["n"].AsInt32);
+    }
+
+    [Fact]
+    public void UpdateOne_reply_contains_n_and_nModified()
+    {
+        var succeededEvents = new List<CommandSucceededEvent>();
+        var client = new InMemoryMongoClient(commandEventSubscribers: builder =>
+            builder.Subscribe<CommandSucceededEvent>(e => succeededEvents.Add(e)));
+        var col = client.GetDatabase("testdb").GetCollection<BsonDocument>("orders");
+        col.InsertOne(new BsonDocument { { "_id", 1 }, { "qty", 5 } });
+        succeededEvents.Clear();
+
+        col.UpdateOne(
+            Builders<BsonDocument>.Filter.Eq("_id", 1),
+            Builders<BsonDocument>.Update.Set("qty", 10));
+
+        var reply = succeededEvents.Single().Reply;
+        Assert.Equal(1, reply["ok"].AsInt32);
+        Assert.Equal(1, reply["n"].AsInt32);
+        Assert.Equal(1, reply["nModified"].AsInt32);
+    }
+
+    [Fact]
+    public void UpdateOne_no_match_reply_contains_zero_counts()
+    {
+        var succeededEvents = new List<CommandSucceededEvent>();
+        var client = new InMemoryMongoClient(commandEventSubscribers: builder =>
+            builder.Subscribe<CommandSucceededEvent>(e => succeededEvents.Add(e)));
+        var col = client.GetDatabase("testdb").GetCollection<BsonDocument>("orders");
+        succeededEvents.Clear();
+
+        col.UpdateOne(
+            Builders<BsonDocument>.Filter.Eq("_id", 999),
+            Builders<BsonDocument>.Update.Set("qty", 10));
+
+        var reply = succeededEvents.Single().Reply;
+        Assert.Equal(0, reply["n"].AsInt32);
+        Assert.Equal(0, reply["nModified"].AsInt32);
+    }
+
+    [Fact]
+    public void UpdateMany_reply_contains_n_and_nModified()
+    {
+        var succeededEvents = new List<CommandSucceededEvent>();
+        var client = new InMemoryMongoClient(commandEventSubscribers: builder =>
+            builder.Subscribe<CommandSucceededEvent>(e => succeededEvents.Add(e)));
+        var col = client.GetDatabase("testdb").GetCollection<BsonDocument>("orders");
+        col.InsertOne(new BsonDocument { { "_id", 1 }, { "qty", 5 } });
+        col.InsertOne(new BsonDocument { { "_id", 2 }, { "qty", 5 } });
+        succeededEvents.Clear();
+
+        col.UpdateMany(
+            Builders<BsonDocument>.Filter.Empty,
+            Builders<BsonDocument>.Update.Set("qty", 10));
+
+        var reply = succeededEvents.Single().Reply;
+        Assert.Equal(1, reply["ok"].AsInt32);
+        Assert.Equal(2, reply["n"].AsInt32);
+        Assert.Equal(2, reply["nModified"].AsInt32);
+    }
+
+    [Fact]
+    public void ReplaceOne_reply_contains_n_and_nModified()
+    {
+        var succeededEvents = new List<CommandSucceededEvent>();
+        var client = new InMemoryMongoClient(commandEventSubscribers: builder =>
+            builder.Subscribe<CommandSucceededEvent>(e => succeededEvents.Add(e)));
+        var col = client.GetDatabase("testdb").GetCollection<BsonDocument>("orders");
+        col.InsertOne(new BsonDocument { { "_id", 1 }, { "item", "old" } });
+        succeededEvents.Clear();
+
+        col.ReplaceOne(
+            Builders<BsonDocument>.Filter.Eq("_id", 1),
+            new BsonDocument { { "_id", 1 }, { "item", "new" } });
+
+        var reply = succeededEvents.Single().Reply;
+        Assert.Equal(1, reply["ok"].AsInt32);
+        Assert.Equal(1, reply["n"].AsInt32);
+        Assert.Equal(1, reply["nModified"].AsInt32);
+    }
+
+    [Fact]
+    public void Aggregate_reply_contains_cursor_with_firstBatch()
+    {
+        var succeededEvents = new List<CommandSucceededEvent>();
+        var client = new InMemoryMongoClient(commandEventSubscribers: builder =>
+            builder.Subscribe<CommandSucceededEvent>(e => succeededEvents.Add(e)));
+        var col = client.GetDatabase("testdb").GetCollection<BsonDocument>("orders");
+        col.InsertOne(new BsonDocument { { "_id", 1 }, { "status", "A" } });
+        col.InsertOne(new BsonDocument { { "_id", 2 }, { "status", "B" } });
+        succeededEvents.Clear();
+
+        col.Aggregate().Match(Builders<BsonDocument>.Filter.Eq("status", "A")).ToList();
+
+        var reply = succeededEvents.Single().Reply;
+        Assert.Equal(1, reply["ok"].AsInt32);
+        Assert.True(reply.Contains("cursor"));
+        var firstBatch = reply["cursor"]["firstBatch"].AsBsonArray;
+        Assert.Single(firstBatch);
+        Assert.Equal("A", firstBatch[0].AsBsonDocument["status"].AsString);
+    }
+
+    [Fact]
+    public void FindOneAndDelete_reply_contains_n()
+    {
+        var succeededEvents = new List<CommandSucceededEvent>();
+        var client = new InMemoryMongoClient(commandEventSubscribers: builder =>
+            builder.Subscribe<CommandSucceededEvent>(e => succeededEvents.Add(e)));
+        var col = client.GetDatabase("testdb").GetCollection<BsonDocument>("orders");
+        col.InsertOne(new BsonDocument { { "_id", 1 } });
+        succeededEvents.Clear();
+
+        col.FindOneAndDelete(Builders<BsonDocument>.Filter.Eq("_id", 1));
+
+        var reply = succeededEvents.Single().Reply;
+        Assert.Equal(1, reply["ok"].AsInt32);
+        Assert.Equal(1, reply["n"].AsInt32);
+    }
+
+    [Fact]
+    public void FindOneAndUpdate_reply_contains_n()
+    {
+        var succeededEvents = new List<CommandSucceededEvent>();
+        var client = new InMemoryMongoClient(commandEventSubscribers: builder =>
+            builder.Subscribe<CommandSucceededEvent>(e => succeededEvents.Add(e)));
+        var col = client.GetDatabase("testdb").GetCollection<BsonDocument>("orders");
+        col.InsertOne(new BsonDocument { { "_id", 1 }, { "qty", 5 } });
+        succeededEvents.Clear();
+
+        col.FindOneAndUpdate(
+            Builders<BsonDocument>.Filter.Eq("_id", 1),
+            Builders<BsonDocument>.Update.Set("qty", 10));
+
+        var reply = succeededEvents.Single().Reply;
+        Assert.Equal(1, reply["ok"].AsInt32);
+        Assert.Equal(1, reply["n"].AsInt32);
+    }
+
+    [Fact]
+    public void FindOneAndReplace_reply_contains_n()
+    {
+        var succeededEvents = new List<CommandSucceededEvent>();
+        var client = new InMemoryMongoClient(commandEventSubscribers: builder =>
+            builder.Subscribe<CommandSucceededEvent>(e => succeededEvents.Add(e)));
+        var col = client.GetDatabase("testdb").GetCollection<BsonDocument>("orders");
+        col.InsertOne(new BsonDocument { { "_id", 1 }, { "item", "old" } });
+        succeededEvents.Clear();
+
+        col.FindOneAndReplace(
+            Builders<BsonDocument>.Filter.Eq("_id", 1),
+            new BsonDocument { { "_id", 1 }, { "item", "new" } });
+
+        var reply = succeededEvents.Single().Reply;
+        Assert.Equal(1, reply["ok"].AsInt32);
+        Assert.Equal(1, reply["n"].AsInt32);
+    }
+
+    [Fact]
+    public void UpdateOne_upsert_reply_contains_nUpserted()
+    {
+        var succeededEvents = new List<CommandSucceededEvent>();
+        var client = new InMemoryMongoClient(commandEventSubscribers: builder =>
+            builder.Subscribe<CommandSucceededEvent>(e => succeededEvents.Add(e)));
+        var col = client.GetDatabase("testdb").GetCollection<BsonDocument>("orders");
+        succeededEvents.Clear();
+
+        col.UpdateOne(
+            Builders<BsonDocument>.Filter.Eq("_id", 1),
+            Builders<BsonDocument>.Update.Set("qty", 10),
+            new UpdateOptions { IsUpsert = true });
+
+        var reply = succeededEvents.Single().Reply;
+        Assert.Equal(0, reply["n"].AsInt32);
+        Assert.Equal(0, reply["nModified"].AsInt32);
+        Assert.Equal(1, reply["nUpserted"].AsInt32);
+    }
+
+    #endregion
 }

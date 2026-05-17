@@ -108,7 +108,8 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                     OperationLog.Record(new OperationRecord { Type = "InsertOne", Document = bson.DeepClone().AsBsonDocument });
                     WriteBackId(document, bson);
                     PublishChangeEvent(ChangeStreamOperationType.Insert, bson);
-                });
+                },
+                replyBuilder: () => new BsonDocument { { "ok", 1 }, { "n", 1 } });
         }
         else
         {
@@ -255,6 +256,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
 
         if (_commandEventEmitter != null)
         {
+            List<BsonDocument>? capturedDocs = null;
             return _commandEventEmitter.EmitCommandEvents(
                 "find",
                 CollectionNamespace.DatabaseNamespace,
@@ -272,9 +274,11 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                             maxAwaitTime: options.MaxAwaitTime);
                     }
                     var docs = FindInternal(filter, options);
+                    capturedDocs = docs.Select(d => SerializeDocument(d).DeepClone().AsBsonDocument).ToList();
                     var batchSize = options?.BatchSize ?? 101;
                     return new InMemoryAsyncCursor<TDocument>(docs, batchSize);
-                });
+                },
+                replyBuilder: _ => ReplyHelper.CursorReply(capturedDocs ?? [], CollectionNamespace));
         }
 
         FaultInjector?.Invoke("find", renderedFilterForLog);
@@ -305,6 +309,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
 
         if (_commandEventEmitter != null)
         {
+            List<BsonDocument>? capturedDocs = null;
             return _commandEventEmitter.EmitCommandEvents(
                 "find",
                 CollectionNamespace.DatabaseNamespace,
@@ -313,8 +318,10 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                 {
                     FaultInjector?.Invoke("find", renderedFilterCheck);
                     OperationLog.Record(new OperationRecord { Type = "Find", Filter = renderedFilterCheck?.DeepClone().AsBsonDocument });
+                    capturedDocs = FindInternalBson(filter).Select(d => d.DeepClone().AsBsonDocument).ToList();
                     return FindSyncProjectionCore(filter, options);
-                });
+                },
+                replyBuilder: _ => ReplyHelper.CursorReply(capturedDocs ?? [], CollectionNamespace));
         }
 
         FaultInjector?.Invoke("find", renderedFilterCheck);
@@ -482,7 +489,8 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                 "delete",
                 CollectionNamespace.DatabaseNamespace,
                 () => new BsonDocument { { "delete", CollectionNamespace.CollectionName }, { "deletes", new BsonArray { new BsonDocument { { "q", renderedFilter?.DeepClone() ?? new BsonDocument() }, { "limit", 1 } } } } },
-                () => DeleteOneCore(filter, renderedFilter));
+                () => DeleteOneCore(filter, renderedFilter),
+                replyBuilder: result => ReplyHelper.DeleteReply(result));
         }
 
         return DeleteOneCore(filter, renderedFilter);
@@ -528,7 +536,8 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                 "delete",
                 CollectionNamespace.DatabaseNamespace,
                 () => new BsonDocument { { "delete", CollectionNamespace.CollectionName }, { "deletes", new BsonArray { new BsonDocument { { "q", renderedFilter?.DeepClone() ?? new BsonDocument() }, { "limit", 0 } } } } },
-                () => DeleteManyCore(filter, renderedFilter));
+                () => DeleteManyCore(filter, renderedFilter),
+                replyBuilder: result => ReplyHelper.DeleteReply(result));
         }
 
         return DeleteManyCore(filter, renderedFilter);
@@ -577,7 +586,8 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                 "update",
                 CollectionNamespace.DatabaseNamespace,
                 () => new BsonDocument { { "update", CollectionNamespace.CollectionName }, { "updates", new BsonArray { new BsonDocument { { "q", renderedFilter?.DeepClone() ?? new BsonDocument() }, { "u", SerializeDocument(replacement).DeepClone() } } } } },
-                () => ReplaceOneCore(filter, replacement, options, renderedFilter));
+                () => ReplaceOneCore(filter, replacement, options, renderedFilter),
+                replyBuilder: result => ReplyHelper.ReplaceReply(result));
         }
 
         return ReplaceOneCore(filter, replacement, options, renderedFilter);
@@ -691,7 +701,8 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                 {
                     try { return UpdateOneCore(filter, update, options, cancellationToken); }
                     catch (MongoCommandException ex) { throw MongoErrors.WrapAsWriteError(ex); }
-                });
+                },
+                replyBuilder: result => ReplyHelper.UpdateReply(result));
         }
 
         try
@@ -800,7 +811,8 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                 {
                     try { return UpdateManyCore(filter, update, options, cancellationToken); }
                     catch (MongoCommandException ex) { throw MongoErrors.WrapAsWriteError(ex); }
-                });
+                },
+                replyBuilder: result => ReplyHelper.UpdateReply(result));
         }
 
         try
@@ -918,7 +930,8 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                 "findAndModify",
                 CollectionNamespace.DatabaseNamespace,
                 () => new BsonDocument { { "findAndModify", CollectionNamespace.CollectionName }, { "query", renderedFilter?.DeepClone() ?? new BsonDocument() }, { "remove", true } },
-                () => FindOneAndDeleteCore<TProjection>(filter, options, renderedFilter));
+                () => FindOneAndDeleteCore<TProjection>(filter, options, renderedFilter),
+                replyBuilder: result => ReplyHelper.FindAndModifyReply(result != null));
         }
 
         return FindOneAndDeleteCore<TProjection>(filter, options, renderedFilter);
@@ -983,7 +996,8 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                 "findAndModify",
                 CollectionNamespace.DatabaseNamespace,
                 () => new BsonDocument { { "findAndModify", CollectionNamespace.CollectionName }, { "query", renderedFilter?.DeepClone() ?? new BsonDocument() }, { "update", SerializeDocument(replacement).DeepClone() } },
-                () => FindOneAndReplaceCore<TProjection>(filter, replacement, options, renderedFilter));
+                () => FindOneAndReplaceCore<TProjection>(filter, replacement, options, renderedFilter),
+                replyBuilder: result => ReplyHelper.FindAndModifyReply(result != null));
         }
 
         return FindOneAndReplaceCore<TProjection>(filter, replacement, options, renderedFilter);
@@ -1097,7 +1111,8 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
                 "findAndModify",
                 CollectionNamespace.DatabaseNamespace,
                 () => new BsonDocument { { "findAndModify", CollectionNamespace.CollectionName }, { "query", renderedFilter?.DeepClone() ?? new BsonDocument() }, { "update", true } },
-                () => FindOneAndUpdateCore<TProjection>(filter, update, options, renderedFilter));
+                () => FindOneAndUpdateCore<TProjection>(filter, update, options, renderedFilter),
+                replyBuilder: result => ReplyHelper.FindAndModifyReply(result != null));
         }
 
         return FindOneAndUpdateCore<TProjection>(filter, update, options, renderedFilter);
@@ -1214,17 +1229,29 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
 
         if (_commandEventEmitter != null)
         {
+            List<BsonDocument>? capturedDocs = null;
             return _commandEventEmitter.EmitCommandEvents(
                 "aggregate",
                 CollectionNamespace.DatabaseNamespace,
                 () => new BsonDocument { { "aggregate", CollectionNamespace.CollectionName }, { "pipeline", new BsonArray() } },
-                () => AggregateCore<TResult>(pipeline, options));
+                () =>
+                {
+                    var cursor = AggregateCore<TResult>(pipeline, options, out var resultDocs);
+                    capturedDocs = resultDocs;
+                    return cursor;
+                },
+                replyBuilder: _ => ReplyHelper.CursorReply(capturedDocs ?? [], CollectionNamespace));
         }
 
         return AggregateCore<TResult>(pipeline, options);
     }
 
     private IAsyncCursor<TResult> AggregateCore<TResult>(PipelineDefinition<TDocument, TResult> pipeline, AggregateOptions? options)
+    {
+        return AggregateCore<TResult>(pipeline, options, out _);
+    }
+
+    private IAsyncCursor<TResult> AggregateCore<TResult>(PipelineDefinition<TDocument, TResult> pipeline, AggregateOptions? options, out List<BsonDocument> resultDocuments)
     {
         // Render the pipeline to BsonDocument stages
         var registry = BsonSerializer.SerializerRegistry;
@@ -1250,6 +1277,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
 
         // Execute the pipeline
         var results = AggregationPipelineExecutor.Execute(input, stages, context).ToList();
+        resultDocuments = results;
 
         // Deserialize results to TResult using the pipeline's output serializer
         var outputSerializer = rendered.OutputSerializer ?? BsonSerializer.LookupSerializer<TResult>();

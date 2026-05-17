@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-05-17
+
+### Fixed
+- **Command monitoring Reply now contains response data**: `CommandSucceededEvent.Reply` previously returned a minimal `{ "ok": 1 }` for all operations. It now includes proper wire-protocol-compatible response fields:
+  - **find/aggregate**: `cursor.firstBatch` with the result documents, `cursor.id`, and `cursor.ns`
+  - **insert**: `n` (number of documents inserted)
+  - **delete**: `n` (number of documents deleted)
+  - **update/replace**: `n` (matched count), `nModified` (modified count), and `nUpserted` (when applicable)
+  - **findAndModify**: `n` (1 if a document was found, 0 otherwise)
+- This enables monitoring subscribers (e.g. TestTrackingDiagrams) to extract response metadata and document previews from in-memory operations
+
 ## [1.1.0] - 2025-07-13
 
 ### Added

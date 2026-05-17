@@ -55,7 +55,8 @@ internal sealed class CommandEventEmitter
         string commandName,
         DatabaseNamespace databaseNamespace,
         Func<BsonDocument> commandBuilder,
-        Action operation)
+        Action operation,
+        Func<BsonDocument>? replyBuilder = null)
     {
         var requestId = Interlocked.Increment(ref _requestId);
         var command = commandBuilder();
@@ -74,9 +75,11 @@ internal sealed class CommandEventEmitter
             operation();
             sw.Stop();
 
+            var reply = replyBuilder?.Invoke() ?? new BsonDocument("ok", 1);
+
             _succeededHandler?.Invoke(new CommandSucceededEvent(
                 commandName,
-                new BsonDocument("ok", 1),
+                reply,
                 databaseNamespace,
                 operationId: requestId,
                 requestId,
@@ -107,7 +110,8 @@ internal sealed class CommandEventEmitter
         string commandName,
         DatabaseNamespace databaseNamespace,
         Func<BsonDocument> commandBuilder,
-        Func<T> operation)
+        Func<T> operation,
+        Func<T, BsonDocument>? replyBuilder = null)
     {
         var requestId = Interlocked.Increment(ref _requestId);
         var command = commandBuilder();
@@ -126,9 +130,11 @@ internal sealed class CommandEventEmitter
             var result = operation();
             sw.Stop();
 
+            var reply = replyBuilder?.Invoke(result) ?? new BsonDocument("ok", 1);
+
             _succeededHandler?.Invoke(new CommandSucceededEvent(
                 commandName,
-                new BsonDocument("ok", 1),
+                reply,
                 databaseNamespace,
                 operationId: requestId,
                 requestId,
